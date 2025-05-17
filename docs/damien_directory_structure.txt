@@ -1,0 +1,103 @@
+graph TD
+    subgraph User_Interaction
+        User[User via Terminal]
+    end
+
+    subgraph DamienCLI_EntryPoint [damien_cli.cli_entry.py]
+        CLI[CLI Interface (Click/Typer)]
+    end
+
+    subgraph Core_Shared_Components [damien_cli.core]
+        Config[config.py]
+        Auth[auth.py]
+        Logging[logging_setup.py]
+        Utils[utils.py]
+    end
+
+    subgraph FeatureSlices [damien_cli.features]
+        subgraph EmailManagementSlice [email_management]
+            EM_Cmd[commands.py]
+            EM_Svc[service.py]
+            EM_Mod[models.py]
+        end
+
+        subgraph RuleManagementSlice [rule_management]
+            RM_Cmd[commands.py]
+            RM_Svc[service.py]
+            RM_Mod[models.py]
+            RM_Store[rule_storage.py]
+        end
+
+        subgraph LLMAnalysisSlice [llm_analysis]
+            LLMA_Cmd[commands.py]
+            LLMA_Svc[service.py]
+            LLMA_Mod[models.py]
+        end
+
+        subgraph UnsubscribeSlice [unsubscribe]
+            US_Cmd[commands.py]
+            US_Svc[service.py]
+        end
+    end
+
+    subgraph Integrations [damien_cli.integrations]
+        GmailInt[gmail_integration.py]
+        LLMIntProvider[(llm_analysis.providers)] %% Conceptually an integration point
+    end
+
+    subgraph ExternalServices
+        GmailAPI[Gmail API]
+        LLMAPI[LLM APIs]
+    end
+
+    %% Flow
+    User --> CLI
+
+    CLI -->|Uses| Config
+    CLI -->|Uses| Logging
+    CLI -->|Routes to Feature Commands| EM_Cmd
+    CLI -->|Routes to Feature Commands| RM_Cmd
+    CLI -->|Routes to Feature Commands| LLMA_Cmd
+    CLI -->|Routes to Feature Commands| US_Cmd
+
+    EM_Cmd --> EM_Svc
+    EM_Svc -->|Uses| GmailInt
+    EM_Svc -->|Uses| EM_Mod
+    EM_Svc -->|Uses| Auth %% For credentials
+
+    RM_Cmd --> RM_Svc
+    RM_Svc --> RM_Store
+    RM_Svc -->|Uses| GmailInt %% To apply rules by fetching/modifying emails
+    RM_Svc -->|Uses| RM_Mod
+
+    LLMA_Cmd --> LLMA_Svc
+    LLMA_Svc -->|Uses| GmailInt %% To fetch emails for analysis
+    LLMA_Svc -->|Uses| LLMIntProvider %% Or directly to integrations if LLM providers are simple
+    LLMA_Svc -->|Uses| LLMA_Mod
+
+    US_Cmd --> US_Svc
+    US_Svc -->|Uses| GmailInt
+
+    GmailInt -->|Interacts with| GmailAPI
+    LLMIntProvider -->|Interacts with| LLMAPI
+
+    %% Shared components used by services
+    EM_Svc -->|Uses| Config
+    RM_Svc -->|Uses| Config
+    LLMA_Svc -->|Uses| Config
+
+
+    classDef entrypoint fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef corecomp fill:#ffc,stroke:#333,stroke-width:2px;
+    classDef feature fill:#cff,stroke:#333,stroke-width:2px;
+    classDef integration fill:#9cf,stroke:#333,stroke-width:2px;
+    classDef external fill:#9f9,stroke:#333,stroke-width:2px;
+
+    class CLI entrypoint;
+    class Config,Auth,Logging,Utils corecomp;
+    class EM_Cmd,EM_Svc,EM_Mod feature;
+    class RM_Cmd,RM_Svc,RM_Mod,RM_Store feature;
+    class LLMA_Cmd,LLMA_Svc,LLMA_Mod feature;
+    class US_Cmd,US_Svc feature;
+    class GmailInt,LLMIntProvider integration;
+    class GmailAPI,LLMAPI external;
