@@ -4,7 +4,7 @@ from . import config # To get DATA_DIR
 
 LOG_FILE_PATH = config.DATA_DIR / "damien_session.log"
 
-def setup_logging(log_level=logging.INFO):
+def setup_logging(log_level=logging.INFO, testing_mode=False): # Added testing_mode back for flexibility
     """Configures basic logging for the application."""
     
     # Create a logger
@@ -21,10 +21,12 @@ def setup_logging(log_level=logging.INFO):
     )
 
     # Console Handler - to print logs to the screen
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level) # Or a different level for console if you want
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # Conditionally add console handler based on testing_mode
+    if not testing_mode:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(log_level) 
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
     # File Handler - to write logs to a file
     try:
@@ -33,12 +35,15 @@ def setup_logging(log_level=logging.INFO):
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     except Exception as e:
-        logger.error(f"Failed to set up file handler for logging: {e}", exc_info=True)
+        # If logger itself is having issues, print directly as a fallback
+        print(f"CRITICAL LOGGING ERROR during file_handler setup: {e}", file=sys.stderr)
+        # Still try to log with the logger if parts of it are working
+        if logger:
+            logger.error(f"Failed to set up file handler for logging: {e}", exc_info=True)
 
 
-    logger.info(f"Logging initialized. Log file: {LOG_FILE_PATH}")
+    # Only log initialization if not in testing mode or if specifically desired
+    if not testing_mode or log_level <= logging.DEBUG: # e.g. log if debug is on
+         logger.info(f"Logging initialized. Log file: {LOG_FILE_PATH if not testing_mode or logger.hasHandlers() else 'No file handler in this mode'}")
+    
     return logger
-
-# You can get the logger by calling this function
-# Example: app_logger = setup_logging()
-# Then use: app_logger.info("Something happened")
