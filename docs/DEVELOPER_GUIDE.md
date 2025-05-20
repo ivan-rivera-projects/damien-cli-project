@@ -55,9 +55,18 @@ poetry run pytest --cov=damien_cli
 ```
 This will show test coverage for the `damien_cli` package. An HTML report can often be generated in `htmlcov/`.
 
-### Testing `rules_api_service.py`
-When testing functions within `damien_cli/core_api/rules_api_service.py`, especially `apply_rules_to_mailbox`, pay close attention to:
-*   **Mocking `gmail_api_service`**: Functions like `list_messages`, `get_message_details`, and batch action methods (`batch_trash_messages`, `batch_modify_message_labels`, etc.) will need to be mocked.
+### Testing Commands with Confirmation and API Interactions
+When testing CLI command functions (e.g., in `features/.../commands.py`) that involve user confirmation or interact with the `core_api` layer:
+*   **Mocking `core_api` Services**: Functions from `gmail_api_service.py` or `rules_api_service.py` that are called by your command should be mocked (e.g., using `@patch('damien_cli.core_api.some_service.some_function')`). This isolates your command logic for testing.
+*   **Mocking Shared `_confirm_action`**: For commands that use the confirmation prompt:
+    *   Patch the shared utility: `@patch('damien_cli.features.your_feature.commands._confirm_action')` (patch where it's *used* by the command module).
+    *   Test different return values from the mock to simulate user confirming `(True, "optional_message")`, user aborting `(False, "Abort message")`, or the `--yes` flag being active (by asserting `_confirm_action` is called with `yes_flag=True` and returns `(True, "Bypass message")`).
+*   **Testing `--yes` Flag**:
+    *   Ensure tests cover scenarios where the `--yes` flag is passed to the command.
+    *   Verify that `_confirm_action` is called with `yes_flag=True`.
+    *   Verify that the command proceeds without interactive prompting and that the appropriate "Confirmation bypassed..." message (now typically echoed by the command function itself after getting it from `_confirm_action`) is present in the output.
+*   **Context Object (`ctx.obj`)**: Remember that `runner.invoke(cli_entry.damien, [...], obj={...})` can be used to set up `ctx.obj` with necessary mocks (like a mock `gmail_service` or `logger`) for your command tests.
+*   **Mocking `gmail_api_service` (for `rules_api_service.py` tests)**: When unit testing functions within `damien_cli/core_api/rules_api_service.py` itself (like `apply_rules_to_mailbox`), you'll mock methods from `gmail_api_service.py` (e.g., `list_messages`, `get_message_details`, batch action methods).
 *   **`list_messages` Side Effect**: To accurately test rule matching and scan limits, use a `side_effect` for the `list_messages` mock. This side effect should:
     *   Inspect the `query_string` argument to simulate how Gmail would filter messages based on the rule's translated query (and any global query filter).
     *   Respect the `max_results` argument to simulate batching and `scan_limit` behavior.
@@ -85,16 +94,18 @@ poetry run flake8 damien_cli tests
 ## Adding a New CLI Command
 
 1. **Identify the Feature Slice:** Determine if the command fits into an existing feature (e.g., `email_management`) or needs a new one under `damien_cli/features/`.
+2. **Shared Utilities**: If your command requires confirmation, use the shared `_confirm_action` function from `damien_cli.core.cli_utils`. Consider adding a `--yes` option to your command for consistency if it involves confirmations.
+3. **Create/Update `commands.py`:** In the relevant feature slice, add your new Click command function(s).
 2. **Create/Update `commands.py`:** In the relevant feature slice, add your new Click command function(s).
-3. **Implement Logic:** Add business logic to the feature's `service.py` and interaction with external APIs to the relevant module in `damien_cli/integrations/`.
-4. **Register Command:** If it's a new command group or a top-level command, register it in `damien_cli/cli_entry.py`.
+4. **Implement Logic:** Add business logic to the feature's `service.py` (if applicable) or directly call `core_api` services. Interaction with external APIs should primarily go through the `core_api` layer.
+5. **Register Command:** If it's a new command group or a top-level command, register it in `damien_cli/cli_entry.py`.
 5. **Add Models:** If your command handles new data structures, define Pydantic models in the feature's `models.py`.
 6. **Write Unit Tests:** Create corresponding tests in the `tests/` directory.
 7. **Update Documentation:** Add the new command to `docs/USER_GUIDE.md` and update `docs/ARCHITECTURE.md` if significant architectural changes are made.
 
 ## Understanding Rule Application (`apply_rules_to_mailbox`)
 
-The `apply_rules_to_mailbox` function in `damien_cli/core_api/rules_api_service.py` is central to how Damien processes emails. Here's a simplified flow:
+The `apply_rules_to_mailbox` function in `damien_cli/core_api/rules_api_service.py` is central to how Damien processes emails. It's called by the `damien rules apply` CLI command. Here's a simplified flow:
 1.  **Load Rules**: Active, enabled rules are loaded. If `rule_ids_to_apply` is specified, rules are filtered accordingly.
 2.  **Iterate Per Rule**: The system processes emails for each rule individually to leverage server-side filtering.
 3.  **Query Generation**:

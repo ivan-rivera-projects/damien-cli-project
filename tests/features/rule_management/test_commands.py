@@ -188,43 +188,69 @@ def test_rules_add_pydantic_validation_error(mock_add_rule, runner):
 
 
 # --- Tests for 'damien rules delete' ---
-@patch("damien_cli.features.rule_management.commands.click.confirm")
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.rules_api_service.delete_rule")
-def test_rules_delete_success(mock_delete_rule, mock_confirm, runner):
-    mock_confirm.return_value = True  # User confirms deletion
+def test_rules_delete_success_interactively(mock_delete_rule, mock_shared_confirm_action, runner): # Renamed
+    mock_shared_confirm_action.return_value = (True, "") # User confirms deletion
     mock_delete_rule.return_value = True  # API delete_rule returns True on success
     rule_id_to_delete = "rule_abc"
 
     result = runner.invoke(
-        cli_entry.damien, ["rules", "delete", "--id", rule_id_to_delete]
+        cli_entry.damien, ["rules", "delete", "--id", rule_id_to_delete] # No --yes
     )
 
     assert result.exit_code == 0
-    mock_confirm.assert_called_once()
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message=f"Are you sure you want to delete the rule '{rule_id_to_delete}'?",
+        yes_flag=False
+    )
     mock_delete_rule.assert_called_once_with(rule_id_to_delete)
     assert f"Rule '{rule_id_to_delete}' deleted successfully." in result.output
 
 
-@patch("damien_cli.features.rule_management.commands.click.confirm")
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.rules_api_service.delete_rule")
-def test_rules_delete_aborted_by_user(mock_delete_rule, mock_confirm, runner):
-    mock_confirm.return_value = False  # User says NO to confirmation
+def test_rules_delete_aborted_by_user_interactively(mock_delete_rule, mock_shared_confirm_action, runner): # Renamed
+    mock_shared_confirm_action.return_value = (False, "Rule deletion aborted by user.") # User says NO
+    # The command will echo the "Rule deletion aborted by user." message.
+    result = runner.invoke(cli_entry.damien, ["rules", "delete", "--id", "some_id"]) # No --yes
 
-    result = runner.invoke(cli_entry.damien, ["rules", "delete", "--id", "some_id"])
-
-    assert result.exit_code == 0  # Command itself doesn't fail
-    mock_confirm.assert_called_once()
+    assert result.exit_code == 0  # Command itself doesn't fail if user aborts via prompt
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to delete the rule 'some_id'?",
+        yes_flag=False
+    )
     mock_delete_rule.assert_not_called()  # delete_rule should not be called
-    assert "Rule deletion aborted by user." in result.output
+    assert "Rule deletion aborted by user." in result.output # This message is now echoed by the command
 
 
-@patch(
-    "damien_cli.features.rule_management.commands.click.confirm"
-)  # Still mock confirm as it's called first
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.rules_api_service.delete_rule")
-def test_rules_delete_not_found(mock_delete_rule, mock_confirm, runner):
-    mock_confirm.return_value = (
-        True  # User confirms, but API will raise RuleNotFoundError
+def test_rules_delete_with_yes_flag(mock_delete_rule, mock_shared_confirm_action, runner):
+    # When yes_flag is True, _confirm_action returns (True, "Confirmation bypassed...")
+    mock_shared_confirm_action.return_value = (True, f"Confirmation bypassed by --yes flag for: Are you sure you want to delete the rule 'rule_xyz'?")
+    mock_delete_rule.return_value = True
+    rule_id_to_delete = "rule_xyz"
+
+    result = runner.invoke(
+        cli_entry.damien, ["rules", "delete", "--id", rule_id_to_delete, "--yes"] # --yes flag present
+    )
+
+    assert result.exit_code == 0
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message=f"Are you sure you want to delete the rule '{rule_id_to_delete}'?",
+        yes_flag=True # Assert it's called with yes_flag=True
+    )
+    mock_delete_rule.assert_called_once_with(rule_id_to_delete)
+    assert f"Confirmation bypassed by --yes flag for: Are you sure you want to delete the rule '{rule_id_to_delete}'?" in result.output
+    assert f"Rule '{rule_id_to_delete}' deleted successfully." in result.output
+
+
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
+@patch("damien_cli.core_api.rules_api_service.delete_rule")
+def test_rules_delete_not_found(mock_delete_rule, mock_shared_confirm_action, runner): # Renamed mock_confirm
+    mock_shared_confirm_action.return_value = (
+        True, "" # User confirms (or --yes is used), but API will raise RuleNotFoundError
     )
     from damien_cli.core_api.exceptions import RuleNotFoundError  # Import for raising
 
@@ -234,10 +260,10 @@ def test_rules_delete_not_found(mock_delete_rule, mock_confirm, runner):
     rule_id_to_delete = "non_existent_rule"
 
     result = runner.invoke(
-        cli_entry.damien, ["rules", "delete", "--id", rule_id_to_delete]
+        cli_entry.damien, ["rules", "delete", "--id", rule_id_to_delete] # Test without --yes first
     )
 
     # The command should now exit with 0 but print the "not found" message from the exception
-    assert result.exit_code == 0
+    assert result.exit_code == 0 # The command itself doesn't fail for not_found, it reports it.
     mock_delete_rule.assert_called_once_with(rule_id_to_delete)
     assert "Rule 'non_existent_rule' not found." in result.output

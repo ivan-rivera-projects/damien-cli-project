@@ -162,48 +162,91 @@ def test_rules_apply_json_output(mock_apply_rules, runner):
         pytest.fail(f"Failed to decode JSON: {e}\nOutput was:\n{result.output}")
 
 
-@patch("damien_cli.features.rule_management.commands.click.confirm")
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")
-def test_rules_apply_with_confirmation(mock_apply_rules, mock_confirm, runner):
-    """Test 'rules apply' with --confirm flag."""
-    # Mock confirmation and API response
-    mock_confirm.return_value = True  # User confirms
+def test_rules_apply_with_user_confirm_interactive_yes(mock_apply_rules, mock_shared_confirm_action, runner): # Renamed
+    """Test 'rules apply' with --confirm flag, user says yes interactively."""
+    mock_shared_confirm_action.return_value = (True, "")  # User confirms interactively
     mock_apply_rules.return_value = {
-        "total_emails_scanned": 5,
-        "emails_matching_any_rule": 2,
-        "actions_planned_or_taken": {"trash": 2},
-        "rules_applied_counts": {"rule-id-1": 2},
-        "dry_run": False,
-        "errors": []
+        "total_emails_scanned": 5, "emails_matching_any_rule": 2,
+        "actions_planned_or_taken": {"trash": 2}, "rules_applied_counts": {"rule-id-1": 2},
+        "dry_run": False, "errors": []
     }
     
-    # Run the command with --confirm
-    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--confirm"])
+    # Run the command with --confirm (no --yes)
+    # Need to pass a mock gmail_service in context for the command to proceed to API call
+    mock_g_service = MagicMock()
+    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--confirm"], obj={'gmail_service': mock_g_service, 'logger': MagicMock()})
     
-    # Verify the confirmation prompt was shown
-    mock_confirm.assert_called_once()
-    
-    # Verify the command proceeded after confirmation
-    assert result.exit_code == 0
+    assert result.exit_code == 0, f"Output: {result.output}"
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to apply rules and potentially modify emails?",
+        yes_flag=False # --yes was not used
+    )
     mock_apply_rules.assert_called_once()
 
 
-@patch("damien_cli.features.rule_management.commands.click.confirm")
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")
-def test_rules_apply_confirmation_aborted(mock_apply_rules, mock_confirm, runner):
-    """Test 'rules apply' when user aborts at confirmation prompt."""
-    # Mock user says "no" to confirmation
-    mock_confirm.return_value = False
+def test_rules_apply_with_user_confirm_interactive_no(mock_apply_rules, mock_shared_confirm_action, runner): # Renamed
+    """Test 'rules apply' with --confirm flag, user says no interactively."""
+    mock_shared_confirm_action.return_value = (False, "Rule application aborted by user confirmation.") # User says no
     
-    # Run the command with --confirm
-    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--confirm"])
+    mock_g_service = MagicMock()
+    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--confirm"], obj={'gmail_service': mock_g_service, 'logger': MagicMock()})
     
-    # Verify the confirmation prompt was shown
-    mock_confirm.assert_called_once()
-    
-    # Verify the command was aborted and API wasn't called
-    assert "aborted" in result.output.lower()
+    assert result.exit_code == 0 # Command aborts gracefully
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to apply rules and potentially modify emails?",
+        yes_flag=False
+    )
+    assert "Rule application aborted by user confirmation." in result.output # This message is now echoed by the command
     mock_apply_rules.assert_not_called()
+
+
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
+@patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")
+def test_rules_apply_with_confirm_and_yes_flag(mock_apply_rules, mock_shared_confirm_action, runner):
+    """Test 'rules apply' with both --confirm and --yes flags."""
+    # When yes_flag is True, _confirm_action returns (True, "Confirmation bypassed...")
+    mock_shared_confirm_action.return_value = (True, "Confirmation bypassed by --yes flag for: Are you sure you want to apply rules and potentially modify emails?")
+    mock_apply_rules.return_value = {
+        "total_emails_scanned": 5, "emails_matching_any_rule": 2,
+        "actions_planned_or_taken": {"trash": 2}, "rules_applied_counts": {"rule-id-1": 2},
+        "dry_run": False, "errors": []
+    }
+    
+    mock_g_service = MagicMock()
+    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--confirm", "--yes"], obj={'gmail_service': mock_g_service, 'logger': MagicMock()})
+    
+    assert result.exit_code == 0, f"Output: {result.output}"
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to apply rules and potentially modify emails?",
+        yes_flag=True # --yes was used
+    )
+    # The command now echoes the message from _confirm_action when yes_flag is true
+    assert "Confirmation bypassed by --yes flag for: Are you sure you want to apply rules and potentially modify emails?" in result.output
+    mock_apply_rules.assert_called_once()
+
+
+@patch("damien_cli.features.rule_management.commands._confirm_action") # Corrected patch target
+@patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")
+def test_rules_apply_without_confirm_but_with_yes_flag(mock_apply_rules, mock_shared_confirm_action, runner):
+    """Test 'rules apply' with --yes flag but --confirm is NOT set (confirmation shouldn't be triggered)."""
+    mock_apply_rules.return_value = {
+        "total_emails_scanned": 5, "emails_matching_any_rule": 2,
+        "actions_planned_or_taken": {"trash": 2}, "rules_applied_counts": {"rule-id-1": 2},
+        "dry_run": False, "errors": []
+    }
+    
+    mock_g_service = MagicMock()
+    # --confirm is NOT passed, only --yes
+    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--yes"], obj={'gmail_service': mock_g_service, 'logger': MagicMock()})
+    
+    assert result.exit_code == 0, f"Output: {result.output}"
+    # _confirm_action should NOT be called because user_must_confirm_apply is False in the command
+    mock_shared_confirm_action.assert_not_called()
+    mock_apply_rules.assert_called_once()
 
 
 @patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")

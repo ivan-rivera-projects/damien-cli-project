@@ -1,5 +1,6 @@
 import pytest
 import json
+import click # Ensure click is imported
 from click.testing import CliRunner
 from unittest.mock import patch, MagicMock # Removed call
 
@@ -253,11 +254,12 @@ def test_emails_get_not_found_human(
 
 
 # --- NEW TESTS for Phase 2 Write Commands ---
-@patch("damien_cli.features.email_management.commands.click.confirm")
+# Note: For commands using the new _confirm_action, we'll patch that instead of click.confirm directly.
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.gmail_api_service.batch_trash_messages")
 def test_emails_trash_cmd_dry_run(
     mock_api_batch_trash,
-    mock_click_confirm,
+    mock_shared_confirm_action, # Updated mock name
     runner,
     mock_gmail_service_in_context,
     mock_logging_setup_for_cli_tests,
@@ -278,24 +280,24 @@ def test_emails_trash_cmd_dry_run(
         in result.output
     )
     mock_api_batch_trash.assert_not_called()
-    mock_click_confirm.assert_not_called()
+    mock_shared_confirm_action.assert_not_called() # _confirm_action is not called in dry_run
 
 
-@patch("damien_cli.features.email_management.commands.click.confirm")
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.gmail_api_service.batch_trash_messages")
-def test_emails_trash_cmd_confirmed(
+def test_emails_trash_cmd_confirmed_interactively( # Renamed for clarity
     mock_api_batch_trash,
-    mock_click_confirm,
+    mock_shared_confirm_action, # Updated mock name
     runner,
     mock_gmail_service_in_context,
     mock_logging_setup_for_cli_tests,
 ):
-    mock_click_confirm.return_value = True
-    # mock_api_batch_trash.return_value = True # API function now returns None on success or raises error
+    mock_shared_confirm_action.return_value = (True, "") # Simulate user saying yes, no specific msg from util
+    # mock_api_batch_trash.return_value = True # API returns None
 
     result = runner.invoke(
         cli_entry.damien,
-        ["emails", "trash", "--ids", "id1,id2"],
+        ["emails", "trash", "--ids", "id1,id2"], # No --yes flag
         obj={
             "logger": mock_logging_setup_for_cli_tests,
             "gmail_service": mock_gmail_service_in_context,
@@ -305,27 +307,30 @@ def test_emails_trash_cmd_confirmed(
     assert (
         result.exit_code == 0
     ), f"CLI exited with {result.exit_code}, output: {result.output}"
-    mock_click_confirm.assert_called_once()
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to move these 2 email(s) to Trash?",
+        yes_flag=False # Explicitly False as --yes was not used
+    )
     mock_api_batch_trash.assert_called_once_with(
         mock_gmail_service_in_context, ["id1", "id2"]
     )
     assert "Successfully moved 2 email(s) to Trash." in result.output
 
 
-@patch("damien_cli.features.email_management.commands.click.confirm")
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.gmail_api_service.batch_trash_messages")
-def test_emails_trash_cmd_aborted(
+def test_emails_trash_cmd_aborted_interactively( # Renamed for clarity
     mock_api_batch_trash,
-    mock_click_confirm,
+    mock_shared_confirm_action, # Updated mock name
     runner,
     mock_gmail_service_in_context,
     mock_logging_setup_for_cli_tests,
 ):
-    mock_click_confirm.return_value = False
-
+    mock_shared_confirm_action.return_value = (False, "Action aborted by user.") # Simulate user saying no
+    # The command will echo the "Action aborted by user." message.
     result = runner.invoke(
         cli_entry.damien,
-        ["emails", "trash", "--ids", "id1"],
+        ["emails", "trash", "--ids", "id1"], # No --yes flag
         obj={
             "logger": mock_logging_setup_for_cli_tests,
             "gmail_service": mock_gmail_service_in_context,
@@ -335,30 +340,73 @@ def test_emails_trash_cmd_aborted(
     assert (
         result.exit_code == 0
     ), f"CLI exited with {result.exit_code}, output: {result.output}"
-    mock_click_confirm.assert_called_once()
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to move these 1 email(s) to Trash?",
+        yes_flag=False # Explicitly False
+    )
     mock_api_batch_trash.assert_not_called()
-    assert "Action aborted by user." in result.output
+    assert "Action aborted by user." in result.output # This message is now echoed by the command
+
+
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
+@patch("damien_cli.core_api.gmail_api_service.batch_trash_messages")
+def test_emails_trash_cmd_with_yes_flag(
+    mock_api_batch_trash,
+    mock_shared_confirm_action, # Updated mock name
+    runner,
+    mock_gmail_service_in_context,
+    mock_logging_setup_for_cli_tests,
+):
+    # When yes_flag is True, _confirm_action returns (True, "Confirmation bypassed...")
+    # The test will assert that this message is part of the output.
+    # We don't need to set mock_shared_confirm_action.return_value here if we are asserting its call_args.
+    # However, to ensure the command proceeds, the mock should reflect what the real function does.
+    # The real _confirm_action returns (True, bypass_message) when yes_flag is True.
+    # Let's make the mock behave similarly for this specific test path.
+    mock_shared_confirm_action.return_value = (True, "Confirmation bypassed by --yes flag for: Are you sure you want to move these 2 email(s) to Trash?")
+
+
+    result = runner.invoke(
+        cli_entry.damien,
+        ["emails", "trash", "--ids", "id1,id2", "--yes"], # --yes flag is present
+        obj={
+            "logger": mock_logging_setup_for_cli_tests,
+            "gmail_service": mock_gmail_service_in_context,
+        },
+    )
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+    mock_shared_confirm_action.assert_called_once_with(
+        prompt_message="Are you sure you want to move these 2 email(s) to Trash?",
+        yes_flag=True # Crucial: assert it was called with yes_flag=True
+    )
+    mock_api_batch_trash.assert_called_once_with(
+        mock_gmail_service_in_context, ["id1", "id2"]
+    )
+    assert "Confirmation bypassed by --yes flag for: Are you sure you want to move these 2 email(s) to Trash?" in result.output
+    assert "Successfully moved 2 email(s) to Trash." in result.output
 
 
 # Tests for 'damien emails delete'
-@patch("damien_cli.features.email_management.commands.click.prompt")
-@patch("damien_cli.features.email_management.commands._confirm_action")
+@patch("damien_cli.features.email_management.commands.click.prompt") # Still need for YESIDO
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.gmail_api_service.batch_delete_permanently")
-def test_emails_delete_cmd_confirmed(
+def test_emails_delete_cmd_confirmed_interactively( # Renamed
     mock_api_batch_delete,
-    mock_internal_confirm_action,
+    mock_shared_confirm_action, # Updated mock name
     mock_click_prompt,
     runner,
     mock_gmail_service_in_context,
     mock_logging_setup_for_cli_tests,
 ):
-    mock_internal_confirm_action.side_effect = [True, True]
+    # _confirm_action is called twice. It needs to return (True, "") for both.
+    mock_shared_confirm_action.return_value = (True, "")
     mock_click_prompt.return_value = "YESIDO"
-    # mock_api_batch_delete.return_value = True # API returns None on success or raises
+    # mock_api_batch_delete.return_value = True # API returns None
 
     result = runner.invoke(
         cli_entry.damien,
-        ["emails", "delete", "--ids", "id_perm_del"],
+        ["emails", "delete", "--ids", "id_perm_del"], # No --yes flag
         obj={
             "logger": mock_logging_setup_for_cli_tests,
             "gmail_service": mock_gmail_service_in_context,
@@ -368,31 +416,41 @@ def test_emails_delete_cmd_confirmed(
     assert (
         result.exit_code == 0
     ), f"CLI exited with {result.exit_code}, output: {result.output}"
-    assert mock_internal_confirm_action.call_count == 2
-    mock_click_prompt.assert_called_once()
+    # Check calls to the shared _confirm_action
+    assert mock_shared_confirm_action.call_count == 2
+    mock_shared_confirm_action.assert_any_call(
+        prompt_message="Are you absolutely sure you want to PERMANENTLY DELETE these 1 email(s)? This is IRREVERSIBLE.",
+        yes_flag=False
+    )
+    mock_shared_confirm_action.assert_any_call(
+        prompt_message=click.style("FINAL WARNING: All checks passed. Confirm PERMANENT DELETION of these emails?", fg="red", bold=True),
+        yes_flag=False,
+        default_abort_message="Permanent deletion aborted at final warning." # Corrected parameter name
+    )
+    mock_click_prompt.assert_called_once() # YESIDO prompt
     mock_api_batch_delete.assert_called_once_with(
         mock_gmail_service_in_context, ["id_perm_del"]
     )
     assert "Successfully PERMANENTLY DELETED 1 email(s)." in result.output
 
 
-@patch("damien_cli.features.email_management.commands.click.prompt")
-@patch("damien_cli.features.email_management.commands._confirm_action")
+@patch("damien_cli.features.email_management.commands.click.prompt") # Still need for YESIDO
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
 @patch("damien_cli.core_api.gmail_api_service.batch_delete_permanently")
-def test_emails_delete_cmd_abort_at_type_yesido(
+def test_emails_delete_cmd_abort_at_type_yesido_interactively( # Renamed
     mock_api_batch_delete,
-    mock_internal_confirm_action,
+    mock_shared_confirm_action, # Updated mock name
     mock_click_prompt,
     runner,
     mock_gmail_service_in_context,
     mock_logging_setup_for_cli_tests,
 ):
-    mock_internal_confirm_action.return_value = True
-    mock_click_prompt.return_value = "NOPE"
+    mock_shared_confirm_action.return_value = (True, "") # First _confirm_action passes
+    mock_click_prompt.return_value = "NOPE" # User types NOPE for YESIDO
 
     result = runner.invoke(
         cli_entry.damien,
-        ["emails", "delete", "--ids", "id_perm_del"],
+        ["emails", "delete", "--ids", "id_perm_del"], # No --yes flag
         obj={
             "logger": mock_logging_setup_for_cli_tests,
             "gmail_service": mock_gmail_service_in_context,
@@ -400,14 +458,72 @@ def test_emails_delete_cmd_abort_at_type_yesido(
     )
 
     assert (
-        result.exit_code == 0
+        result.exit_code == 0 # Command itself doesn't error, user aborted
     ), f"CLI exited with {result.exit_code}, output: {result.output}"
-    mock_internal_confirm_action.assert_called_once()
+    mock_shared_confirm_action.assert_called_once_with( # Only the first _confirm_action is called
+        prompt_message="Are you absolutely sure you want to PERMANENTLY DELETE these 1 email(s)? This is IRREVERSIBLE.",
+        yes_flag=False
+    )
     mock_click_prompt.assert_called_once()
     mock_api_batch_delete.assert_not_called()
     assert (
-        "Confirmation text did not match. Permanent deletion aborted." in result.output
+        "Confirmation text did not match. Permanent deletion aborted." in result.output # This is echoed by the command
     )
+
+
+@patch("damien_cli.features.email_management.commands.click.prompt") # click.prompt for YESIDO is not used if --yes
+@patch("damien_cli.features.email_management.commands._confirm_action") # Corrected patch target
+@patch("damien_cli.core_api.gmail_api_service.batch_delete_permanently")
+def test_emails_delete_cmd_with_yes_flag(
+    mock_api_batch_delete,
+    mock_shared_confirm_action, # Updated mock name
+    mock_click_prompt, # Will assert this is NOT called
+    runner,
+    mock_gmail_service_in_context,
+    mock_logging_setup_for_cli_tests,
+):
+    # When yes_flag is True, _confirm_action returns (True, "Confirmation bypassed...")
+    # The command will call it twice.
+    # We can use side_effect if different bypass messages are critical to distinguish,
+    # or a single tuple if the message content isn't part of this specific mock's check.
+    # For simplicity, let's assume the command logic handles echoing the correct bypass messages.
+    # The key is that _confirm_action returns True as the first element of the tuple.
+    mock_shared_confirm_action.return_value = (True, "Confirmation bypassed by --yes flag for: some prompt")
+
+
+    result = runner.invoke(
+        cli_entry.damien,
+        ["emails", "delete", "--ids", "id_perm_del", "--yes"], # --yes flag is present
+        obj={
+            "logger": mock_logging_setup_for_cli_tests,
+            "gmail_service": mock_gmail_service_in_context,
+        },
+    )
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+    # _confirm_action should be called twice (for the two main confirmations)
+    assert mock_shared_confirm_action.call_count == 2
+    mock_shared_confirm_action.assert_any_call(
+        prompt_message="Are you absolutely sure you want to PERMANENTLY DELETE these 1 email(s)? This is IRREVERSIBLE.",
+        yes_flag=True
+    )
+    mock_shared_confirm_action.assert_any_call(
+        prompt_message=click.style("FINAL WARNING: All checks passed. Confirm PERMANENT DELETION of these emails?", fg="red", bold=True),
+        yes_flag=True,
+        default_abort_message="Permanent deletion aborted at final warning." # Corrected parameter name
+    )
+    
+    mock_click_prompt.assert_not_called() # YESIDO prompt should be skipped
+
+    mock_api_batch_delete.assert_called_once_with(
+        mock_gmail_service_in_context, ["id_perm_del"]
+    )
+    assert "Successfully PERMANENTLY DELETED 1 email(s)." in result.output
+    # Check if the generic bypass message (from the mock's return_value) is present.
+    # Since _confirm_action is called twice, this message (or parts of it) should appear.
+    # The command itself echoes the message part of the tuple returned by _confirm_action.
+    assert "Confirmation bypassed by --yes flag for: some prompt" in result.output
+    assert "Confirmation 'YESIDO' bypassed by --yes flag." in result.output # This is echoed directly by the command
 
 
 # Tests for 'damien emails label'

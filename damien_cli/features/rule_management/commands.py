@@ -15,6 +15,9 @@ from damien_cli.core_api.exceptions import (
     GmailApiError,
 )
 
+# Import the shared confirmation utility
+from damien_cli.core.cli_utils import _confirm_action
+
 # Models are still used for creating new rules from JSON, if that's how add_rule_cmd works
 from .models import RuleModel  # Assuming models.py is still in features/rule_management
 
@@ -249,10 +252,11 @@ def add_rule_cmd(ctx, rule_json, output_format):
 @click.option('--date-before', type=str, default=None, help="Process emails before this date (YYYY/MM/DD format).")
 @click.option('--all-mail', is_flag=True, help="Process all mail without date restrictions. By default, only processes last 30 days.")
 @click.option('--dry-run', is_flag=True, help="Simulate rule application without making actual changes.")
-@click.option('--confirm', is_flag=True, help="Require user confirmation before applying actions (if not dry-run).")
+@click.option('--confirm', 'user_must_confirm_apply', is_flag=True, help="Require explicit confirmation before applying actions (if not dry-run).") # Renamed for clarity
+@click.option('--yes', '-y', is_flag=True, help="Automatically answer yes to an apply confirmation prompt.") # NEW
 @click.option('--output-format', type=click.Choice(['human', 'json']), default='human', show_default=True)
 @click.pass_context
-def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, all_mail, dry_run, confirm, output_format):
+def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, all_mail, dry_run, user_must_confirm_apply, yes, output_format): # Added 'yes', renamed 'confirm'
     """Applies configured (or specified) active rules to emails.
     
     By default, only processes emails from the last 30 days unless --all-mail, --date-after, 
@@ -293,8 +297,9 @@ def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, a
         "date_after": date_after,
         "date_before": date_before,
         "all_mail": all_mail,
-        "dry_run": dry_run, 
-        "confirm": confirm
+        "dry_run": dry_run,
+        "confirm": user_must_confirm_apply, # Use new name
+        "yes": yes # Added yes
     }
     
     if not g_service_client:
@@ -317,14 +322,26 @@ def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, a
             click.echo("Operation aborted.")
             return
     
-    if not dry_run and confirm:
-        if not click.confirm("Are you sure you want to apply rules and potentially modify emails?", default=False, abort=False):
-            msg = "Rule application aborted by user confirmation."
-            if output_format == 'json': 
-                sys.stdout.write(json.dumps({"status":"aborted_by_user", "message":msg}, indent=2)+'\n')
-            else: 
-                click.echo(msg)
-            return
+    if not dry_run and user_must_confirm_apply:
+        confirmed, confirm_msg = _confirm_action(
+            prompt_message="Are you sure you want to apply rules and potentially modify emails?",
+            yes_flag=yes
+        )
+        if yes and confirmed: # Changed yes_flag to yes
+            click.echo(click.style(confirm_msg, fg="green")) # Echo the bypass message from _confirm_action
+
+        if not confirmed:
+            if output_format == 'human' and not yes: # Changed yes_flag to yes
+                click.echo(confirm_msg) # Echo the abort message from _confirm_action
+            elif output_format == 'json': # Always provide JSON abort message if not confirmed
+                 sys.stdout.write(json.dumps({
+                    "status":"aborted_by_user",
+                    "command_executed": cmd_name,
+                    "message": confirm_msg, # Use message from _confirm_action
+                    "data": {"action_taken": False},
+                    "error_details": None
+                }, indent=2)+'\n')
+            return # Abort the command
     
     rule_ids_list = [rid.strip() for rid in rule_ids.split(',')] if rule_ids else None
     
@@ -422,6 +439,7 @@ def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, a
 @click.option(
     "--id", "rule_identifier", required=True, help="ID or Name of the rule to delete."
 )
+@click.option('--yes', '-y', is_flag=True, help="Automatically answer yes to confirmation prompts.") # NEW
 @click.option(
     "--output-format",
     type=click.Choice(["human", "json"]),
@@ -430,7 +448,7 @@ def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, a
     help="Output format.",
 )
 @click.pass_context
-def delete_rule_cmd(ctx, rule_identifier, output_format):
+def delete_rule_cmd(ctx, rule_identifier, yes, output_format): # Added 'yes'
     """Deletes a rule by its ID or Name."""
     logger = ctx.obj.get("logger")
     cmd_name = "damien rules delete"
@@ -453,27 +471,28 @@ def delete_rule_cmd(ctx, rule_identifier, output_format):
 
     if logger:
         logger.info(f"Attempting to delete rule: {rule_identifier}")
-    if not click.confirm(
-        f"Are you sure you want to delete the rule '{rule_identifier}'?",
-        default=False,
-        abort=False,
-    ):
-        msg = "Rule deletion aborted by user."
-        if output_format == "json":
-            # For user abort, status is "success" or "aborted" but not an error from the app's perspective
+
+    confirmed, confirm_msg = _confirm_action(
+        prompt_message=f"Are you sure you want to delete the rule '{rule_identifier}'?",
+        yes_flag=yes
+    )
+    if yes and confirmed: # Changed yes_flag to yes
+        click.echo(click.style(confirm_msg, fg="green"))
+
+    if not confirmed:
+        if output_format == 'human' and not yes: # Changed yes_flag to yes
+            click.echo(confirm_msg)
+        elif output_format == "json":
             response_obj = {
                 "status": "aborted_by_user",
                 "command_executed": cmd_name,
-                "message": msg,
+                "message": confirm_msg, # Use message from _confirm_action
                 "data": None,
                 "error_details": None,
             }
             sys.stdout.write(json.dumps(response_obj, indent=2) + "\n")
-        else:
-            click.echo(msg)
-        if logger:
-            logger.info("User aborted rule deletion.")
-        return
+        return # Abort the command
+
     try:
         rules_api_service.delete_rule(rule_identifier)  # Returns True or raises
         msg = f"Rule '{rule_identifier}' deleted successfully."

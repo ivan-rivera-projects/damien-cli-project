@@ -77,7 +77,7 @@ Moves specified emails to the Trash folder.
 
 * `--ids <ID1,ID2,...>`: Comma-separated list of email IDs (required).
 * `--dry-run`: Show what would be done without making changes.
-
+* `--yes` / `-y`: Automatically answer "yes" to confirmation prompts.
 Example:
 ```bash
 poetry run damien emails trash --ids 196abc123,197def456 --dry-run
@@ -90,7 +90,7 @@ PERMANENTLY deletes specified emails. This action is irreversible.
 
 * `--ids <ID1,ID2,...>`: Comma-separated list of email IDs (required).
 * `--dry-run`: Show what would be done without making changes.
-
+* `--yes` / `-y`: Automatically answer "yes" to ALL confirmation prompts for permanent deletion. Use with extreme caution.
 Example:
 ```bash
 poetry run damien emails delete --ids 196abc123 --dry-run
@@ -177,7 +177,7 @@ poetry run damien rules add --rule-json '{"name": "Quick Rule", "conditions": [.
 Deletes a rule by its ID or Name.
 
 * `--id <RULE_ID_OR_NAME>`: The ID or name of the rule to delete (required).
-
+* `--yes` / `-y`: Automatically answer "yes" to confirmation prompts.
 Example:
 ```bash
 poetry run damien rules delete --id "Trash Old Promos" # Will ask for confirmation
@@ -195,9 +195,9 @@ Applies configured (or specified) active rules to emails in your Gmail account. 
 *   `--date-before <YYYY/MM/DD>`: Process emails received before this date.
 *   `--all-mail`: Process all mail without any default date restrictions. By default (if no date options are specified), Damien processes emails from the last 30 days. Using `--all-mail` overrides this default.
 *   `--dry-run`: Simulate rule application without making any actual changes to your emails. Shows what actions would be taken. Highly recommended for testing new rules.
-*   `--confirm`: Require user confirmation before applying actions (if not in `dry-run` mode).
+*   `--confirm`: Require user confirmation before applying actions (if not in `dry-run` mode). This prompt can be bypassed if `--yes` is also used.
+*   `--yes` / `-y`: Automatically answer "yes" to the `--confirm` prompt if it's active.
 *   `--output-format [human|json]`: Output format for the summary.
-
 **Understanding Date Filtering:**
 *   If neither `--date-after`, `--date-before`, nor `--all-mail` is specified, `rules apply` defaults to processing emails from the last 30 days.
 *   `--date-after` and `--date-before` can be used together to define a specific date range.

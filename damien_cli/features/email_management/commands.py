@@ -11,6 +11,9 @@ from damien_cli.core_api.exceptions import (
     DamienError,
 )
 
+# Import the shared confirmation utility
+from damien_cli.core.cli_utils import _confirm_action
+
 # (SCOPES import might not be needed here anymore if not directly used)
 # from damien_cli.core.config import SCOPES
 
@@ -36,13 +39,7 @@ def _parse_ids(ids_str: str) -> list:
     return [id_val.strip() for id_val in ids_str.split(",") if id_val.strip()]
 
 
-def _confirm_action(
-    prompt_message: str, abort_message: str = "Action aborted by user."
-) -> bool:
-    if not click.confirm(prompt_message, default=False, abort=False):
-        click.echo(abort_message)
-        return False
-    return True
+# Removed local _confirm_action, will use the one from core.cli_utils
 
 
 # --- Click Command Group ---
@@ -376,6 +373,7 @@ def get_cmd(
 @click.option(
     "--dry-run", is_flag=True, help="Show what would be done without actually doing it."
 )
+@click.option('--yes', '-y', is_flag=True, help="Automatically answer yes to confirmation prompts.")
 @click.option(
     "--output-format",
     type=click.Choice(["human", "json"]),
@@ -383,12 +381,12 @@ def get_cmd(
     show_default=True,
 )
 @click.pass_context
-def trash_cmd(ctx, message_ids_str, dry_run, output_format):
+def trash_cmd(ctx, message_ids_str, dry_run, yes, output_format): # Added 'yes'
     logger = ctx.obj.get("logger")
     g_service_client = ctx.obj.get("gmail_service")
     cmd_name = "damien emails trash"
     message_ids = _parse_ids(message_ids_str)
-    params_provided = {"ids": message_ids, "dry_run": dry_run}
+    params_provided = {"ids": message_ids, "dry_run": dry_run, "yes": yes} # Added 'yes' to params
     if not message_ids:
         msg = "No message IDs provided to trash."
         if logger:
@@ -438,11 +436,17 @@ def trash_cmd(ctx, message_ids_str, dry_run, output_format):
             logger.info("Dry run: Trash operation completed.")
         return
 
-    if not _confirm_action(
-        f"Are you sure you want to move these {len(message_ids)} email(s) to Trash?"
-    ):
-        msg = "Action aborted by user."
-        if output_format == "json":
+    confirmed, confirm_msg = _confirm_action(
+        prompt_message=f"Are you sure you want to move these {len(message_ids)} email(s) to Trash?",
+        yes_flag=yes
+    )
+    if yes and confirmed : # Changed yes_flag to yes
+        click.echo(click.style(confirm_msg, fg="green"))
+
+    if not confirmed:
+        if output_format == "human" and not yes: # Changed yes_flag to yes
+            click.echo(confirm_msg)
+        elif output_format == "json": # Always provide JSON abort message if not confirmed
             response_obj = {
                 "status": "aborted_by_user",
                 "command_executed": cmd_name,
@@ -524,6 +528,7 @@ def trash_cmd(ctx, message_ids_str, dry_run, output_format):
     help="Comma-separated IDs to PERMANENTLY DELETE.",
 )
 @click.option("--dry-run", is_flag=True, help="Show what would be done.")
+@click.option('--yes', '-y', is_flag=True, help="Automatically answer yes to ALL confirmation prompts.")
 @click.option(
     "--output-format",
     type=click.Choice(["human", "json"]),
@@ -531,13 +536,13 @@ def trash_cmd(ctx, message_ids_str, dry_run, output_format):
     show_default=True,
 )
 @click.pass_context
-def delete_permanently_cmd(ctx, message_ids_str, dry_run, output_format):
+def delete_permanently_cmd(ctx, message_ids_str, dry_run, yes, output_format): # Added 'yes'
     """PERMANENTLY deletes specified emails. This action is IRREVERSIBLE."""
     logger = ctx.obj.get("logger")
     g_service_client = ctx.obj.get("gmail_service")
     cmd_name = "damien emails delete"
     message_ids = _parse_ids(message_ids_str)
-    params_provided = {"ids": message_ids, "dry_run": dry_run}
+    params_provided = {"ids": message_ids, "dry_run": dry_run, "yes": yes} # Added 'yes' to params
 
     if not message_ids:
         msg = "No message IDs provided to delete permanently."
@@ -594,11 +599,18 @@ def delete_permanently_cmd(ctx, message_ids_str, dry_run, output_format):
         return
 
     # First confirmation
-    if not _confirm_action(
-        f"Are you absolutely sure you want to PERMANENTLY DELETE these {len(message_ids)} email(s)? This is IRREVERSIBLE."
-    ):
-        msg = "Action aborted by user."
-        if output_format == "json":
+    # First confirmation
+    confirmed, confirm_msg = _confirm_action(
+        prompt_message=f"Are you absolutely sure you want to PERMANENTLY DELETE these {len(message_ids)} email(s)? This is IRREVERSIBLE.",
+        yes_flag=yes
+    )
+    if yes and confirmed: # Changed yes_flag to yes
+        click.echo(click.style(confirm_msg, fg="green"))
+
+    if not confirmed:
+        if output_format == "human" and not yes: # Changed yes_flag to yes
+            click.echo(confirm_msg)
+        elif output_format == "json":
             response_obj = {
                 "status": "aborted_by_user",
                 "command_executed": cmd_name,
@@ -614,11 +626,13 @@ def delete_permanently_cmd(ctx, message_ids_str, dry_run, output_format):
             logger.info("User aborted permanent delete operation.")
         return
 
-    # Second confirmation (YESIDO) for human format only
-    if output_format == "human":
-        confirmation_text = click.prompt(
-            click.style(
-                "This action is IRREVERSIBLE. To proceed, type 'YESIDO' and press Enter",
+    # Second "YESIDO" confirmation (only if not bypassed by --yes and first confirm passed)
+    if confirmed and not yes: # Only prompt if --yes was NOT given and first confirm passed
+        # Only prompt for YESIDO if in human output mode, JSON mode would skip this specific interactive prompt
+        if output_format == "human":
+            confirmation_text = click.prompt(
+                click.style(
+                    "This action is IRREVERSIBLE. To proceed, type 'YESIDO' and press Enter",
                 fg="yellow",
                 bold=True,
             ),
@@ -627,24 +641,49 @@ def delete_permanently_cmd(ctx, message_ids_str, dry_run, output_format):
             show_default=False,
             prompt_suffix=": ",
         )
-        if confirmation_text.strip().upper() != "YESIDO":
-            click.echo("Confirmation text did not match. Permanent deletion aborted.")
-            if logger:
-                logger.info("User failed second confirmation (did not type YESIDO).")
-            return
+            if confirmation_text.strip().upper() != "YESIDO":
+                click.echo("Confirmation text did not match. Permanent deletion aborted.")
+                if logger: logger.info("User failed second confirmation (did not type YESIDO).")
+                # Handle JSON abort for this specific failure if desired, or let it fall through
+                if output_format == "json":
+                     sys.stdout.write(json.dumps({
+                        "status": "aborted_by_user",
+                        "command_executed": cmd_name,
+                        "message": "Confirmation text 'YESIDO' did not match. Permanent deletion aborted.",
+                        "data": {"action_taken": False},
+                        "error_details": None
+                    }, indent=2)+'\n')
+                return
+    elif confirmed and yes: # If --yes was given and previous confirm passed
+        click.echo(click.style("Confirmation 'YESIDO' bypassed by --yes flag.", fg="green"))
+        if logger: logger.info("'YESIDO' confirmation bypassed by --yes flag.")
+    # If first confirm failed, 'confirmed' is False, so these YESIDO blocks are skipped.
 
-        # Final warning for human format
-        if not _confirm_action(
-            click.style(
-                "FINAL WARNING: All checks passed. Confirm PERMANENT DELETION of these emails?",
-                fg="red",
-                bold=True,
-            ),
-            abort_message="Permanent deletion aborted at final warning.",
-        ):
-            if logger:
-                logger.info("User aborted permanent delete at final warning.")
+    # Third "FINAL WARNING" confirmation (only if all previous steps passed or were bypassed by --yes)
+    if confirmed: # 'confirmed' here means all prior checks passed or were bypassed by --yes
+        final_confirmed, final_confirm_msg = _confirm_action(
+            prompt_message=click.style("FINAL WARNING: All checks passed. Confirm PERMANENT DELETION of these emails?", fg="red", bold=True),
+            yes_flag=yes,
+            default_abort_message="Permanent deletion aborted at final warning."
+        )
+        if yes and final_confirmed: # Changed yes_flag to yes
+            click.echo(click.style(final_confirm_msg, fg="green"))
+        
+        if not final_confirmed:
+            if output_format == "human" and not yes: # Changed yes_flag to yes
+                click.echo(final_confirm_msg)
+            elif output_format == "json":
+                 sys.stdout.write(json.dumps({
+                    "status": "aborted_by_user",
+                    "command_executed": cmd_name,
+                    "message": final_confirm_msg, # Use message from _confirm_action
+                    "data": {"action_taken": False},
+                    "error_details": None
+                }, indent=2)+'\n')
             return
+    elif not confirmed: # If first confirmation failed, we should have already returned. This is a safeguard.
+        return
+
 
     try:
         gmail_api_service.batch_delete_permanently(g_service_client, message_ids)
