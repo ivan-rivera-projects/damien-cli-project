@@ -1,15 +1,18 @@
 import click
 import json
 import sys
-from typing import Optional
+from typing import Optional, List
 from pydantic import ValidationError
 
 # Updated import to use the new API service layer
 from damien_cli.core_api import rules_api_service
+from damien_cli.core_api import gmail_api_service as gmail_api_service_module # To pass module
 from damien_cli.core_api.exceptions import (
     RuleNotFoundError,
     RuleStorageError,
     InvalidParameterError,
+    DamienError,
+    GmailApiError,
 )
 
 # Models are still used for creating new rules from JSON, if that's how add_rule_cmd works
@@ -236,6 +239,183 @@ def add_rule_cmd(ctx, rule_json, output_format):
         if logger:
             logger.error(msg, exc_info=True)
         _output_error(msg, "UNEXPECTED_ERROR", str(e))
+
+
+@rules_group.command("apply")
+@click.option('--query', '-q', default=None, help="Optional Gmail query to filter emails for rule application.")
+@click.option('--rule-ids', default=None, help="Comma-separated list of specific rule IDs or Names to apply. Applies all enabled if not set.")
+@click.option('--scan-limit', type=int, default=None, help="Maximum number of emails to scan. Default is no limit.")
+@click.option('--date-after', type=str, default=None, help="Process emails after this date (YYYY/MM/DD format).")
+@click.option('--date-before', type=str, default=None, help="Process emails before this date (YYYY/MM/DD format).")
+@click.option('--all-mail', is_flag=True, help="Process all mail without date restrictions. By default, only processes last 30 days.")
+@click.option('--dry-run', is_flag=True, help="Simulate rule application without making actual changes.")
+@click.option('--confirm', is_flag=True, help="Require user confirmation before applying actions (if not dry-run).")
+@click.option('--output-format', type=click.Choice(['human', 'json']), default='human', show_default=True)
+@click.pass_context
+def apply_rules_cmd(ctx, query, rule_ids, scan_limit, date_after, date_before, all_mail, dry_run, confirm, output_format):
+    """Applies configured (or specified) active rules to emails.
+    
+    By default, only processes emails from the last 30 days unless --all-mail, --date-after, 
+    or --date-before options are provided.
+    """
+    logger = ctx.obj.get('logger')
+    g_service_client = ctx.obj.get('gmail_service') # Raw Google API client from context
+    cmd_name = "damien rules apply"
+    
+    # Build the Gmail query with date filtering if needed
+    gmail_query = query or ""
+    
+    # Apply date restrictions
+    if not all_mail:
+        # Calculate dates for filtering
+        if date_after:
+            gmail_query = f"{gmail_query} after:{date_after}" if gmail_query else f"after:{date_after}"
+        elif date_before:
+            # If only date_before is specified, don't apply default date_after
+            pass
+        else:
+            # Default to last 30 days if no date restrictions specified
+            from datetime import datetime, timedelta
+            thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y/%m/%d")
+            gmail_query = f"{gmail_query} after:{thirty_days_ago}" if gmail_query else f"after:{thirty_days_ago}"
+            
+        if date_before:
+            gmail_query = f"{gmail_query} before:{date_before}" if gmail_query else f"before:{date_before}"
+    
+    # Log the final query
+    if gmail_query:
+        logger.info(f"Using Gmail query: {gmail_query}")
+    
+    params_provided = {
+        "query": query, 
+        "rule_ids": rule_ids, 
+        "scan_limit": scan_limit, 
+        "date_after": date_after,
+        "date_before": date_before,
+        "all_mail": all_mail,
+        "dry_run": dry_run, 
+        "confirm": confirm
+    }
+    
+    if not g_service_client:
+        msg = "Damien is not connected to Gmail. Please run `damien login` first."
+        if output_format == 'json': 
+            sys.stdout.write(json.dumps({"status":"error", "message":msg, "error_details":{"code":"NO_GMAIL_SERVICE"}}, indent=2)+'\n')
+        else: 
+            click.secho(msg, fg="red")
+        ctx.exit(1)
+        return
+    
+    if logger: 
+        logger.info(f"Executing '{cmd_name}' with params: {params_provided}")
+    
+    # If no query/scan limit and processing all mail, warn about large operation
+    if not gmail_query and not scan_limit and all_mail:
+        warning_msg = "Warning: You are about to apply rules to your entire mailbox with no filtering or limits. This could process a large number of emails."
+        click.secho(warning_msg, fg="yellow")
+        if not click.confirm("Are you sure you want to continue?", default=False):
+            click.echo("Operation aborted.")
+            return
+    
+    if not dry_run and confirm:
+        if not click.confirm("Are you sure you want to apply rules and potentially modify emails?", default=False, abort=False):
+            msg = "Rule application aborted by user confirmation."
+            if output_format == 'json': 
+                sys.stdout.write(json.dumps({"status":"aborted_by_user", "message":msg}, indent=2)+'\n')
+            else: 
+                click.echo(msg)
+            return
+    
+    rule_ids_list = [rid.strip() for rid in rule_ids.split(',')] if rule_ids else None
+    
+    try:
+        # Call the core API function
+        # Pass the actual modules/instances as dependencies
+        application_summary = rules_api_service.apply_rules_to_mailbox(
+            g_service_client=g_service_client,
+            gmail_api_service=gmail_api_service_module, # Pass the imported module
+            gmail_query_filter=gmail_query, # Now includes date filtering
+            rule_ids_to_apply=rule_ids_list,
+            scan_limit=scan_limit,
+            dry_run=dry_run
+        )
+        
+        # --- Format Output ---
+        if output_format == 'json':
+            response_obj = {
+                "status": "success", 
+                "command_executed": cmd_name, 
+                "parameters_provided": params_provided,
+                "message": "Rule application process completed.", 
+                "data": application_summary, 
+                "error_details": None
+            }
+            sys.stdout.write(json.dumps(response_obj, indent=2) + '\n')
+        else: # Human output
+            click.echo("\n--- Rule Application Summary ---")
+            click.echo(f"Dry Run: {'Yes' if application_summary['dry_run'] else 'No'}")
+            click.echo(f"Total Emails Scanned: {application_summary['total_emails_scanned']}")
+            click.echo(f"Emails Matching Any Rule: {application_summary['emails_matching_any_rule']}")
+            
+            click.echo("\nActions Planned/Taken:")
+            if not application_summary['actions_planned_or_taken']:
+                click.echo(" No actions were planned or taken.")
+            else:
+                for action, items in application_summary['actions_planned_or_taken'].items():
+                    count = items if isinstance(items, int) else len(items) # Dry run might have counts, actual run list of IDs
+                    click.echo(f" - {action}: {count} email(s)")
+            
+            click.echo("\nRules Applied Counts (how many times each rule's actions were triggered):")
+            if not application_summary['rules_applied_counts']:
+                click.echo(" No rules were triggered.")
+            else:
+                for rule_id_val, count in application_summary['rules_applied_counts'].items():
+                    # Try to get rule name for better display
+                    # This is a bit inefficient here, ideally summary would include names
+                    try:
+                        all_loaded_rules = rules_api_service.load_rules() # Could be cached from earlier call
+                        rule_name_display = next((r.name for r in all_loaded_rules if r.id == rule_id_val), rule_id_val)
+                    except Exception:
+                        rule_name_display = rule_id_val
+                    click.echo(f" - Rule '{rule_name_display}' (ID: {rule_id_val}): {count} time(s)")
+            
+            if application_summary['errors']:
+                click.secho("\nErrors Encountered During Application:", fg="red")
+                for err_item in application_summary['errors']:
+                    click.echo(f" - {err_item}")
+            
+            click.echo("--- End of Summary ---")
+        
+        if logger: 
+            logger.info(f"'{cmd_name}' completed. Summary: {application_summary}")
+    
+    except (RuleStorageError, GmailApiError, InvalidParameterError, DamienError) as e:
+        msg = f"Error during '{cmd_name}': {e.message if hasattr(e, 'message') else str(e)}"
+        if output_format == 'json': 
+            sys.stdout.write(json.dumps({
+                "status":"error", 
+                "message":msg, 
+                "error_details":{"code":e.__class__.__name__.upper(), "details":str(e)}
+            }, indent=2)+'\n')
+        else: 
+            click.secho(msg, fg="red")
+        if logger: 
+            logger.error(msg, exc_info=True)
+        ctx.exit(1)
+    
+    except Exception as e:
+        msg = f"An unexpected error occurred in '{cmd_name}': {e}"
+        if output_format == 'json': 
+            sys.stdout.write(json.dumps({
+                "status":"error", 
+                "message":msg, 
+                "error_details":{"code":"UNEXPECTED_ERROR", "details":str(e)}
+            }, indent=2)+'\n')
+        else: 
+            click.secho(msg, fg="red")
+        if logger: 
+            logger.error(msg, exc_info=True)
+        ctx.exit(1)
 
 
 @rules_group.command("delete")

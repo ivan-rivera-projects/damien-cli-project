@@ -1,0 +1,7 @@
+{
+  "name": "Example: Trash by Subject Keyword",
+  "description": "Example rule: Trashes emails with 'specific keyword' in subject",
+  "is_enabled": true,
+  "conditions": [{"field": "subject", "operator": "contains", "value": "specific keyword"}],
+  "actions": [{"type": "trash"}]
+}

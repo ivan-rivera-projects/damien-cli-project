@@ -34,3 +34,12 @@ data/*.log
 .idea/
 *.swp
 *~
+
+# macOS
+.DS_Store
+
+# Backup files
+*.bak
+
+# User-specific rules file
+data/rules.json

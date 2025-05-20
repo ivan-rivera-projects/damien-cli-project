@@ -148,8 +148,12 @@ _system_labels = [
 ]
 
 
+def _clear_label_cache_for_testing():
+    """ONLY FOR TESTING: Clears the internal label cache."""
+    _label_name_to_id_cache.clear()
+
 def _populate_label_cache(service: Any):
-    """Helper to fetch and populate the label cache."""
+    """Helper to fetch and populate the label cache. Stores name->id, id->id, and id->name."""
     if not service:
         raise InvalidParameterError(
             "Gmail service not available for populating label cache."
@@ -157,17 +161,18 @@ def _populate_label_cache(service: Any):
 
     try:
         logger.debug("Populating Gmail label cache...")
-        print(
-            "DEBUG: _populate_label_cache: About to call service.users().labels().list().execute()"
-        )  # DEBUG PRINT
         results = service.users().labels().list(userId="me").execute()
         labels = results.get("labels", [])
-        _label_name_to_id_cache.clear()  # Clear before repopulating
+        
+        current_cache = _label_name_to_id_cache.copy()  # Preserve existing entries if any
+        _label_name_to_id_cache.clear()  # Clear before repopulating for a full refresh
         for lbl in labels:
-            _label_name_to_id_cache[lbl["name"].lower()] = lbl["id"]  # For name lookup
-            _label_name_to_id_cache[lbl["id"]] = lbl["id"]  # For ID passthrough
+            _label_name_to_id_cache[lbl["name"].lower()] = lbl["id"]  # For name lookup (name -> id)
+            _label_name_to_id_cache[lbl["id"]] = lbl["id"]  # For ID passthrough (id -> id)
+            _label_name_to_id_cache[f"name_for_{lbl['id']}"] = lbl["name"]  # For ID to Name lookup (id -> name)
+        
         logger.debug(
-            f"Label cache populated with {len(_label_name_to_id_cache)} entries."
+            f"Label cache populated. New size: {len(_label_name_to_id_cache)} entries."
         )
     except HttpError as e:
         logger.error(
@@ -182,39 +187,64 @@ def _populate_label_cache(service: Any):
 def get_label_id(service: Any, label_name_or_id: str) -> Optional[str]:
     """Gets the ID of a label given its name or confirms an ID. Caches results."""
     if not service:
+        # This path should ideally not be hit if service is always checked by caller
+        logger.error("get_label_id called with no service.")
         raise InvalidParameterError("Gmail service not available for get_label_id.")
     if not label_name_or_id:
         raise InvalidParameterError("Label name or ID cannot be empty.")
-
-    # System labels have their names as IDs (usually uppercase)
-    if label_name_or_id.upper() in _system_labels:
-        return label_name_or_id.upper()
-
-    # Populate cache if empty
-    if not _label_name_to_id_cache:
+    
+    label_name_or_id_upper = label_name_or_id.upper()
+    if label_name_or_id_upper in _system_labels:
+        return label_name_or_id_upper
+    
+    if not _label_name_to_id_cache: 
         _populate_label_cache(service)
-
-    # Check cache (direct match for ID, lowercase match for name)
-    if label_name_or_id in _label_name_to_id_cache:  # Exact match (could be an ID)
-        return _label_name_to_id_cache[label_name_or_id]
-
-    found_id = _label_name_to_id_cache.get(
-        label_name_or_id.lower()
-    )  # Case-insensitive name lookup
-    if not found_id:
-        logger.warning(
-            f"Label '{label_name_or_id}' not found in cache after populating. Forcing refresh."
-        )
-        _populate_label_cache(service)  # Try one more time with fresh cache
-        if label_name_or_id in _label_name_to_id_cache:
+    
+    # Check 1: Direct match (could be an ID or a case-sensitive name that's already an ID)
+    if label_name_or_id in _label_name_to_id_cache:
+        return _label_name_to_id_cache[label_name_or_id] 
+    
+    # Check 2: Case-insensitive name lookup
+    found_id = _label_name_to_id_cache.get(label_name_or_id.lower())
+    
+    if not found_id: 
+        logger.warning(f"Label '{label_name_or_id}' not found in cache after initial population. Forcing refresh.")
+        _populate_label_cache(service) 
+        
+        if label_name_or_id in _label_name_to_id_cache: # Re-check direct
             return _label_name_to_id_cache[label_name_or_id]
-        found_id = _label_name_to_id_cache.get(label_name_or_id.lower())
+        found_id = _label_name_to_id_cache.get(label_name_or_id.lower()) # Re-check lowercase
+        
         if not found_id:
-            logger.warning(
-                f"Label '{label_name_or_id}' still not found after cache refresh."
-            )
+            logger.warning(f"Label '{label_name_or_id}' still not found after cache refresh.")
             return None
     return found_id
+
+
+def get_label_name_from_id(service: Any, label_id: str) -> Optional[str]:
+    """Gets the display name of a label given its ID. Caches results."""
+    if not service:
+        raise InvalidParameterError("Gmail service not available for get_label_name_from_id.")
+    if not label_id:
+        raise InvalidParameterError("Label ID cannot be empty for get_label_name_from_id.")
+    
+    label_id_upper = label_id.upper()
+    if label_id_upper in _system_labels: # System labels use their name as ID
+        return label_id_upper
+    
+    cache_key_for_name = f"name_for_{label_id}"
+    if not _label_name_to_id_cache or cache_key_for_name not in _label_name_to_id_cache: 
+        _populate_label_cache(service) # Populate if cache is empty or specific ID->name mapping missing
+    
+    found_name = _label_name_to_id_cache.get(cache_key_for_name)
+    if not found_name:
+        logger.warning(f"Label name for ID '{label_id}' not found in cache even after populating. Forcing refresh.")
+        _populate_label_cache(service) # Try one more time
+        found_name = _label_name_to_id_cache.get(cache_key_for_name)
+        if not found_name:
+            logger.warning(f"Label name for ID '{label_id}' still not found after cache refresh.")
+            return None # Or return the ID itself if a name can't be found? Or raise error?
+    return found_name
 
 
 # --- Message Read Operations ---

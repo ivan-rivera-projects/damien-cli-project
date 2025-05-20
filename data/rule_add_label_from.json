@@ -1,0 +1,7 @@
+{
+  "name": "Example: Add Label from Sender",
+  "description": "Example rule: Adds 'MyLabel' to emails from 'sender@example.com'",
+  "is_enabled": true,
+  "conditions": [{"field": "from", "operator": "contains", "value": "sender@example.com"}],
+  "actions": [{"type": "add_label", "label_name": "MyLabel"}]
+}

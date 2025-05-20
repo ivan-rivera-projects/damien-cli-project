@@ -1,0 +1,11 @@
+{
+  "name": "Example: Multi-Condition OR Logic",
+  "description": "Example rule: Adds 'MyLabel' if email is from 'sender1@example.com' OR subject contains 'Order Confirmation'",
+  "is_enabled": true,
+  "conditions": [
+    {"field": "from", "operator": "contains", "value": "sender1@example.com"},
+    {"field": "subject", "operator": "contains", "value": "Order Confirmation"}
+  ],
+  "condition_conjunction": "OR",
+  "actions": [{"type": "add_label", "label_name": "MyLabel"}]
+}

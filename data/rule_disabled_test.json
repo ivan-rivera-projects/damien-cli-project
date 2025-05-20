@@ -1,0 +1,7 @@
+{
+  "name": "Disabled Rule Test",
+  "description": "This rule should not run",
+  "is_enabled": false,
+  "conditions": [{"field": "subject", "operator": "contains", "value": "ThisWontMatchBecauseDisabled"}],
+  "actions": [{"type": "trash"}]
+}
