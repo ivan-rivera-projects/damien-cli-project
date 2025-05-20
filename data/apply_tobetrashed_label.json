@@ -1,0 +1,12 @@
+{
+  "name": "Apply ToBeTrashed Label",
+  "description": "Adds 'tobetrashedbyrule' label. Intended to be used with specific queries.",
+  "is_enabled": true,
+  "conditions": [
+    {"field": "subject", "operator": "contains", "value": ""}
+  ],
+  "condition_conjunction": "AND",
+  "actions": [
+    {"type": "add_label", "label_name": "tobetrashedbyrule"}
+  ]
+}

@@ -110,6 +110,8 @@ The `apply_rules_to_mailbox` function in `damien_cli/core_api/rules_api_service.
 6.  **Action Aggregation**: Actions for matched emails are collected.
 7.  **Execute Actions**: If not a `dry_run`, the aggregated actions (e.g., trash, add/remove label) are performed in batches using `gmail_api_service` functions.
 
+*Note on Performance*: Be mindful that rules with conditions not translatable to efficient server-side Gmail queries (e.g., `body_snippet` checks) can lead to fetching many candidate emails if the global query filter is broad. The `scan_limit` parameter in `apply_rules_to_mailbox` (and exposed via the CLI) is crucial for managing this during development, testing, and for user control, as it limits the total number of candidates processed across all rules in a run.
+
 ## Git Workflow (Example)
 
 * Work on feature branches (e.g., `feature/add-rule-application`).

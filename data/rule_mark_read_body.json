@@ -1,7 +1,7 @@
 {
   "name": "Example: Mark Read by Body Content",
-  "description": "Example rule: Marks emails as read if their body contains 'important keyword phrase'",
+  "description": "Example rule: Marks emails as read if their body contains 'E2EBodyTestXYZ123'",
   "is_enabled": true,
-  "conditions": [{"field": "body_snippet", "operator": "contains", "value": "important keyword phrase"}],
+  "conditions": [{"field": "body_snippet", "operator": "contains", "value": "E2EBodyTestXYZ123"}],
   "actions": [{"type": "mark_read"}]
 }

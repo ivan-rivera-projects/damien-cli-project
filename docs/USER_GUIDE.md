@@ -214,6 +214,15 @@ Applies configured (or specified) active rules to emails in your Gmail account. 
 5.  Actions for matched emails are aggregated.
 6.  If not a `--dry-run`, the actions are executed.
 
+**Interpreting the Summary & Performance Tips:**
+*   **`Total Emails Scanned`**: This metric in the summary represents the sum of candidate emails fetched for *each rule* based on its specific combined query (global filters + rule's own server-filterable conditions). If an email is a candidate for multiple rules, it will be counted towards this total for each of those rules. This number can be higher than the unique number of emails in your initial scope if there's overlap in rule candidacy.
+*   **`Emails Matching Any Rule`**: This is the count of *unique* email IDs that matched at least one rule after all server-side and client-side processing. This is a more direct measure of how many individual emails were ultimately affected or would be affected.
+*   **Performance with Broad Conditions**: Rules with conditions that cannot be efficiently filtered by Gmail's server-side search (e.g., conditions on `body_snippet` or complex regular expressions if they were supported) might cause Damien to fetch a large number of initial candidate emails, especially if your global `--query` or date range is broad. Damien will then perform client-side matching on these candidates.
+    *   **Recommendation**: For such rules, or when running `rules apply` on a very large mailbox or broad date range for the first time, it's highly recommended to:
+        *   Use the `--dry-run` flag first to see how many candidates are being fetched and what actions would be taken.
+        *   Utilize the `--scan-limit <NUMBER>` option to cap the total number of emails processed. This helps prevent excessive API calls and long run times.
+        *   Employ more specific global `--query` options or tighter date ranges (`--date-after`, `--date-before`) to narrow down the initial set of emails considered.
+
 **Example Usage:**
 
 Apply all enabled rules to emails from the last 7 days, in dry-run mode:
