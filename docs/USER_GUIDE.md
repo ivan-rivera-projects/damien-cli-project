@@ -184,4 +184,56 @@ poetry run damien rules delete --id "Trash Old Promos" # Will ask for confirmati
 poetry run damien rules delete --id "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # Using rule ID
 ```
 
-(Note: Rule application `damien rules apply` is a planned feature.)
+#### rules apply
+
+Applies configured (or specified) active rules to emails in your Gmail account. This command allows for powerful, automated email processing.
+
+*   `--query <TEXT>` or `-q <TEXT>`: Optional Gmail query to further filter emails *before* rules are applied (e.g., "in:inbox"). This is combined with rule-specific queries.
+*   `--rule-ids <ID1,ID2,...>`: Comma-separated list of specific rule IDs or Names to apply. If not set, all enabled rules are considered.
+*   `--scan-limit <NUMBER>`: Maximum number of emails to scan across all rules. This helps limit the scope of a run. Default is no limit (processes all matched emails per rule, up to an internal maximum per rule if not otherwise limited).
+*   `--date-after <YYYY/MM/DD>`: Process emails received after this date.
+*   `--date-before <YYYY/MM/DD>`: Process emails received before this date.
+*   `--all-mail`: Process all mail without any default date restrictions. By default (if no date options are specified), Damien processes emails from the last 30 days. Using `--all-mail` overrides this default.
+*   `--dry-run`: Simulate rule application without making any actual changes to your emails. Shows what actions would be taken. Highly recommended for testing new rules.
+*   `--confirm`: Require user confirmation before applying actions (if not in `dry-run` mode).
+*   `--output-format [human|json]`: Output format for the summary.
+
+**Understanding Date Filtering:**
+*   If neither `--date-after`, `--date-before`, nor `--all-mail` is specified, `rules apply` defaults to processing emails from the last 30 days.
+*   `--date-after` and `--date-before` can be used together to define a specific date range.
+*   `--all-mail` processes the entire mailbox subject to other filters like `--query` or rule conditions. If `--all-mail` is used with `--date-after` or `--date-before`, the explicit date options take precedence for that boundary.
+
+**Execution Flow:**
+1.  Damien loads active rules (or the subset specified by `--rule-ids`).
+2.  For each rule, it constructs a Gmail query. This query combines:
+    *   The global filter from `--query` (if any).
+    *   The date filters (`--date-after`, `--date-before`, or the 30-day default unless `--all-mail` is used).
+    *   Conditions from the rule itself that can be translated into Gmail search terms (e.g., `from:`, `subject:`, `label:`).
+3.  Damien fetches emails matching this combined query.
+4.  If a rule has conditions that *cannot* be translated into a Gmail query (e.g., body content checks, complex OR logic), Damien fetches the full details for the candidate emails and performs client-side matching.
+5.  Actions for matched emails are aggregated.
+6.  If not a `--dry-run`, the actions are executed.
+
+**Example Usage:**
+
+Apply all enabled rules to emails from the last 7 days, in dry-run mode:
+```bash
+poetry run damien rules apply --date-after $(date -v-7d +%Y/%m/%d) --dry-run
+# Note: date command might vary by OS. For macOS, the above works.
+# For GNU date (Linux), it might be: date --date="7 days ago" +%Y/%m/%d
+```
+
+Apply a specific rule named "Archive Newsletters" to unread emails, with confirmation:
+```bash
+poetry run damien rules apply --rule-ids "Archive Newsletters" --query "is:unread" --confirm
+```
+
+Apply rules to all emails older than 2023/01/01, limited to scanning 500 emails in total:
+```bash
+poetry run damien rules apply --date-before 2023/01/01 --scan-limit 500
+```
+
+Output a JSON summary of a dry run for all rules against all mail:
+```bash
+poetry run damien rules apply --all-mail --dry-run --output-format json
+```

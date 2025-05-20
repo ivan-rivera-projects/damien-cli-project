@@ -62,6 +62,7 @@ graph TD
     GMAIL_API_SVC --> API_EXC;
     RULES_API_SVC --> RULES_JSON;
     RULES_API_SVC --> API_EXC;
+    RULES_API_SVC --> GMAIL_API_SVC; # Added: Rules service uses Gmail service for fetching and actions
     
     GI --> G_API;
     GI --> TOK; # gmail_integration reads/writes token
@@ -97,7 +98,7 @@ graph TD
   * **utils.py** (Optional): Common utility functions.
 * **damien_cli/core_api/**: A service layer that abstracts interactions with integrations and data storage. Provides a cleaner interface for feature commands.
   * **gmail_api_service.py**: Handles business logic related to Gmail operations, using `integrations/gmail_integration.py` for raw API calls and token management.
-  * **rules_api_service.py**: Handles business logic for rule storage (CRUD from `rules.json`) and rule matching logic.
+  * **rules_api_service.py**: Handles business logic for rule storage (CRUD from `rules.json`), rule matching logic, and orchestrates the rule application process. This includes fetching emails (via `gmail_api_service.py`), performing server-side and client-side matching (e.g., using `translate_rule_to_gmail_query` and `does_email_match_rule`), and delegating email actions (like labeling or trashing) back to `gmail_api_service.py`.
   * **exceptions.py**: Custom exceptions specific to the API service layer (e.g., `RuleNotFoundError`, `GmailApiError`).
 * **damien_cli/features/**: Houses the feature slices. Each slice typically contains:
   * **commands.py**: Click command definitions specific to the feature. These commands now primarily interact with services in the `core_api` layer.
