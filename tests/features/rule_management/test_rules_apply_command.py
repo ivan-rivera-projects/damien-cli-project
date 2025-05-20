@@ -265,7 +265,74 @@ def test_rules_apply_with_errors_in_summary(mock_apply_rules, runner):
     result = runner.invoke(cli_entry.damien, ["rules", "apply"])
     
     # Verify errors are displayed
-    assert result.exit_code == 0  # Command still succeeds
+    assert result.exit_code == 0  # Command itself succeeds even if summary has errors from API
     assert "Errors Encountered During Application" in result.output
     assert "Rate limit exceeded" in result.output
     assert "Label not found" in result.output
+
+
+@patch("damien_cli.core_api.gmail_api_service.get_authenticated_service", return_value=None) # Patch where it's defined, so cli_entry uses the mock
+@patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox") # This mock won't be hit by apply_rules_cmd
+def test_rules_apply_no_gmail_service(mock_apply_rules_cmd_target, mock_get_auth_svc_gmail_api, runner): # Renamed mock_get_auth_svc
+    """Test 'rules apply' when no Gmail service is found in context (user not logged in)."""
+    # The critical part is that mock_get_auth_svc_gmail_api ensures gmail_service is None when cli_entry.py calls it.
+    result = runner.invoke(cli_entry.damien, ["rules", "apply"])
+
+    assert result.exit_code == 1
+    assert "Damien is not connected to Gmail" in result.output
+    mock_apply_rules_cmd_target.assert_not_called()
+    mock_get_auth_svc_gmail_api.assert_called_once() # cli_entry should try to get it
+
+@patch("damien_cli.core_api.gmail_api_service.get_authenticated_service", return_value=None) # Patch where it's defined
+@patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox") # This mock won't be hit
+def test_rules_apply_no_gmail_service_json_output(mock_apply_rules_cmd_target, mock_get_auth_svc_gmail_api, runner): # Renamed mock_get_auth_svc
+    """Test 'rules apply' with JSON output when no Gmail service is found."""
+    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--output-format", "json"])
+    
+    assert result.exit_code == 1
+    try:
+        output_data = json.loads(result.output)
+        assert output_data["status"] == "error"
+        assert "Damien is not connected to Gmail" in output_data["message"]
+        assert output_data["error_details"]["code"] == "NO_GMAIL_SERVICE"
+    except json.JSONDecodeError:
+        pytest.fail(f"Failed to decode JSON output: {result.output}")
+    mock_apply_rules_cmd_target.assert_not_called()
+    mock_get_auth_svc_gmail_api.assert_called_once()
+
+
+@patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")
+def test_rules_apply_rule_storage_error(mock_apply_rules, runner):
+    """Test 'rules apply' when RuleStorageError is raised by the API."""
+    from damien_cli.core_api.exceptions import RuleStorageError
+    mock_apply_rules.side_effect = RuleStorageError("Failed to load rules from disk.")
+    
+    # Need to pass a mock gmail_service in context for the command to proceed to API call
+    mock_g_service = MagicMock()
+    result = runner.invoke(cli_entry.damien, ["rules", "apply"], obj={'gmail_service': mock_g_service})
+    
+    assert result.exit_code == 1
+    assert "Error" in result.output
+    assert "Failed to load rules from disk" in result.output
+
+
+@patch("damien_cli.core_api.rules_api_service.apply_rules_to_mailbox")
+def test_rules_apply_api_error_json_output(mock_apply_rules, runner):
+    """Test 'rules apply' with JSON output when a GmailApiError occurs."""
+    from damien_cli.core_api.exceptions import GmailApiError
+    error_message = "Mocked Gmail API failure"
+    mock_apply_rules.side_effect = GmailApiError(error_message)
+
+    # Need to pass a mock gmail_service in context
+    mock_g_service = MagicMock()
+    result = runner.invoke(cli_entry.damien, ["rules", "apply", "--output-format", "json"], obj={'gmail_service': mock_g_service})
+
+    assert result.exit_code == 1
+    try:
+        output_data = json.loads(result.output)
+        assert output_data["status"] == "error"
+        assert error_message in output_data["message"]
+        assert output_data["error_details"]["code"] == "GMAILAPIERROR" # Error class name to upper
+        assert error_message in output_data["error_details"]["details"]
+    except json.JSONDecodeError:
+        pytest.fail(f"Failed to decode JSON output: {result.output}")
