@@ -2,77 +2,90 @@
 
 This document outlines the current development status and future plans for Damien-CLI.
 
-## Current Status (2024-05-18)
+## Current Status (2025-05-20)
 
-The project has successfully completed the initial development phases, establishing a core set of functionalities for Gmail management.
+The project has successfully completed the initial development phases, establishing a core set of functionalities for Gmail management and AI integration.
 
 * **Phase 0: Foundation & Setup - COMPLETE**
 * **Phase 1: Core Email Read Operations - COMPLETE**
 * **Phase 2: Core Email Write Operations & Basic Rules - COMPLETE**
-* **Phase 3 (A3.1): Refine JSON output for CLI commands - COMPLETE**
+* **Phase 3: LLM Integration & Advanced Features - IN PROGRESS**
+  * **A3.1: Refine JSON output for CLI commands - COMPLETE**
+  * **A3.2: Implement Rule Application Logic - COMPLETE**
+  * **A3.3: MCP Server Development - COMPLETE**
+  * **A3.4: Claude Integration - IN PROGRESS**
 
 Key features implemented:
 * Secure OAuth 2.0 authentication with Gmail.
-* Listing and detailed viewing of emails.
-* Email modification: trash, permanent delete (with safeguards), labeling, mark as read/unread.
+* Email management: listing, view details, trash, permanently delete, label, mark read/unread.
+* Rule management: add, list, delete, and apply rules via JSON definitions.
+* MCP-compliant server for AI assistant integration:
+  * FastAPI server with proper authentication
+  * DynamoDB integration for session context management
+  * Robust adapter layer connecting MCP to Damien core_api
+  * Environment-based settings with proper nested model support
+  * Comprehensive test suite for all components
 * `--dry-run` mode for all write operations.
 * User confirmation for destructive actions.
-* Basic rule management: add, list, delete rules via JSON definitions.
-* Core logic for rule matching against email fields.
-* Consistent JSON output for programmatic use.
-* Comprehensive unit test suite.
+* Comprehensive unit test suite for CLI and server.
 
-## Next Steps: Phase 3 - LLM Integration & Advanced Features
+## Next Steps: Phase 3 Continued - AI Assistant Integration
 
-The immediate focus is on integrating Large Language Model (LLM) capabilities and enhancing rule application.
+The immediate focus is on completing the Claude integration for AI-powered email management.
 
-* **A3.2: Develop External LLM Orchestrator Prototype**
-  * **Goal:** Create a separate Python application that uses an LLM (e.g., OpenAI API) to understand natural language commands from a user.
-  * This orchestrator will translate user requests into Damien-CLI command invocations (using `subprocess` and Damien's JSON output).
-  * It will parse Damien's JSON responses and use the LLM to present results back to the user or decide on follow-up actions.
+* **A3.4: Complete Claude Integration**
+  * **Goal:** Integrate Damien MCP Server with Claude to enable natural language email management.
   * **Key Tasks:**
-    * Define Damien's commands as "tools/functions" for the LLM.
-    * Implement the interaction loop: User -> LLM -> Damien -> LLM -> User.
+    * Generate formal JSON schemas for all ten Damien tools
+    * Configure Claude to access the MCP Server using these schemas
+    * Test progressive interactions from simple to complex
+    * Refine schemas and server behavior based on testing results
+    * Document the integration process and user experience
 
-* **A3.3: Implement Rule Application Logic (`damien rules apply`)**
-  * **Goal:** Enable Damien to process emails against the configured rules and take the defined actions.
+* **A3.5: Performance Optimization & Security Hardening**
+  * **Goal:** Ensure the MCP Server and Claude integration can handle production workloads securely.
   * **Key Tasks:**
-    * Create a `damien rules apply` command.
-    * Implement logic to:
-      * Fetch emails (potentially based on a query or all emails).
-      * For each email, transform its data into the simplified format expected by the `does_email_match_rule` service.
-      * If a rule matches, queue the defined actions.
-      * Execute queued actions using `gmail_integration.py` (respecting `--dry-run`).
-      * Provide clear feedback on actions taken.
-      * Consider batching and API rate limits.
+    * Implement proper caching strategies for frequent requests
+    * Add rate limiting to prevent API exhaustion
+    * Enhance error handling and recovery mechanisms
+    * Conduct security audit of the entire system
+    * Implement monitoring and alerting
 
-* **A3.4 (Optional Stretch Goal for Phase 3): Direct LLM Analysis within Damien (`damien analyze`)**
-  * **Goal:** Allow Damien to directly use an LLM for tasks like spam classification, sentiment analysis, or summarization on specified emails.
+* **A3.6: MCP Server Deployment Options**
+  * **Goal:** Create multiple deployment options for the MCP Server.
   * **Key Tasks:**
-    * Implement `llm_interface.py` to securely manage API keys and make calls to LLM providers.
-    * Create a `damien analyze [--llm <provider>]` command.
-    * Process and display LLM analysis results.
+    * Local development setup (already implemented)
+    * Docker containerization
+    * Cloud deployment guides (AWS, GCP, Azure)
+    * Simplified installation process for non-technical users
 
 ## Future Phases & Ideas (Beyond Phase 3)
 
-* **Phase 4: Polish, Packaging & Distribution**
-  * Advanced error handling and user feedback.
-  * Comprehensive end-user documentation review.
-  * Packaging for PyPI for easier installation (`pip install damien-cli`).
-  * Potential for executable creation (e.g., using PyInstaller).
-* **Advanced Rule Conditions:**
-  * Date-based conditions (e.g., "older than 90 days").
-  * Attachment-based conditions (name, type, size).
-  * Regular expression matching.
-* **User Interface:**
-  * Explore a Terminal User Interface (TUI) using libraries like `Textual`.
-  * Potential for a web GUI in the distant future if demand exists.
-* **Performance Optimizations:** For extremely large mailboxes or complex rule sets.
-* **Support for Other Email Providers:** (Major undertaking).
-* **Real-time/Scheduled Processing:** Running Damien automatically in the background.
-* **More Sophisticated LLM Integrations:**
-  * Dynamic rule generation by an LLM based on email examples.
-  * LLM-powered email summarization.
-  * Automated email drafting/reply suggestions.
+* **Phase 4: Enhanced AI Capabilities**
+  * Implement advanced LLM-based email analysis features:
+    * Automatic categorization and labeling
+    * Sentiment analysis and priority detection
+    * Summary generation for long email threads
+    * Intelligent rule suggestions based on user behavior
+  * Explore fine-tuning LLMs specifically for email management tasks
+  * Add support for multi-modal capabilities (handling images, attachments)
+
+* **Phase 5: Expansion & Integration**
+  * Support for other email providers beyond Gmail
+  * Calendar integration for scheduling-related emails
+  * Task management integration (convert emails to tasks)
+  * Integration with other productivity tools
+
+* **Phase 6: Commercial & Enterprise Features**
+  * Multi-user support with permission management
+  * Team-based rules and workflows
+  * Advanced analytics dashboard
+  * Enterprise deployment options
+  * Compliance and security features (e.g., DLP, audit logs)
+
+* **UI Development (Parallel Track)**
+  * Terminal User Interface (TUI) using libraries like `Textual`
+  * Web interface for non-technical users
+  * Mobile app for on-the-go email management
 
 This roadmap will be updated as the project progresses.

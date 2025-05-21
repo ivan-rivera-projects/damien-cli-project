@@ -129,6 +129,98 @@ def get_authenticated_service(interactive_auth_ok: bool = True):
         raise DamienError(f"Unexpected error building Gmail service: {e}")
 
 
+def get_g_service_client_from_token(
+    token_file_path_str: str,
+    credentials_file_path_str: str,  # Needed for robust refresh
+    scopes: List[str]
+) -> Any:  # Returns the Google API client resource 'Any' or raises error
+    """
+    Gets an authenticated Gmail API service client non-interactively using stored tokens.
+    Refreshes the token if expired and possible. Saves refreshed token.
+    Raises DamienError or GmailApiError if authentication fails.
+    
+    Args:
+        token_file_path_str (str): Path to the token.json file
+        credentials_file_path_str (str): Path to credentials.json file (needed for refresh)
+        scopes (List[str]): OAuth scopes required for authentication
+        
+    Returns:
+        Any: The Gmail service object
+        
+    Raises:
+        DamienError: If token file is missing, invalid, or refresh fails
+        GmailApiError: If API errors occur during service build
+    """
+    logger.debug(f"Attempting to get Gmail service client from token file: {token_file_path_str}")
+    token_file = Path(token_file_path_str)
+    creds_file = Path(credentials_file_path_str)  # For refresh context
+    
+    if not token_file.exists():
+        msg = f"Token file not found at {token_file}. Please ensure Damien CLI has been logged in."
+        logger.error(msg)
+        raise DamienError(msg)
+    
+    creds: Optional[Credentials] = None
+    try:
+        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
+    except Exception as e:
+        logger.error(f"Failed to load credentials from token file {token_file}: {e}", exc_info=True)
+        raise DamienError(f"Could not load token from {token_file}: {e}", original_exception=e)
+    
+    if not creds:  # Should be caught by above, but as a safeguard
+        raise DamienError(f"Unknown error loading credentials from {token_file}.")
+    
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            logger.info(f"Access token from {token_file} is expired. Attempting refresh.")
+            if not creds_file.exists():  # Check for credentials.json needed for robust refresh
+                msg = f"Credentials file ({creds_file}) not found, which may be needed for token refresh."
+                logger.warning(msg)
+                # Depending on the grant type, refresh might still work without it if refresh_token is powerful enough.
+                # But for some OAuth client types, client_secret from credentials.json is needed.
+            
+            try:
+                # The google-auth library's refresh mechanism will try to use client secrets
+                # from credentials if the flow was originally an installed app flow.
+                # We pass the credentials_file to from_client_secrets_file in InstalledAppFlow,
+                # so the refresh token should be associated with that client_id/secret.
+                creds.refresh(Request())  # Request() is a transport adapter
+                logger.info(f"Access token refreshed successfully using token from {token_file}.")
+                
+                try:
+                    with open(token_file, 'w') as tf:
+                        tf.write(creds.to_json())
+                    logger.info(f"Refreshed token saved to {token_file}.")
+                except IOError as e_io:
+                    logger.error(f"Failed to save refreshed token to {token_file}: {e_io}", exc_info=True)
+                    # Continue with in-memory refreshed token, but log error
+            except Exception as e_refresh:  # Catch specific refresh errors if possible
+                logger.error(f"Failed to refresh access token from {token_file}: {e_refresh}", exc_info=True)
+                raise DamienError(
+                    f"Token refresh failed for {token_file}. Re-authentication via CLI 'damien login' may be required.",
+                    original_exception=e_refresh
+                )
+        else:
+            msg = f"Token from {token_file} is invalid and cannot be refreshed (expired: {creds.expired}, has_refresh: {bool(creds.refresh_token)})."
+            logger.error(msg)
+            raise DamienError(msg + " Re-authentication via CLI 'damien login' may be required.")
+    
+    # At this point, creds should be valid
+    if not creds.valid:  # Final check
+        raise DamienError(f"Failed to obtain valid credentials from {token_file} even after refresh attempt.")
+    
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+        logger.debug(f"Gmail API service client built successfully using token from {token_file}.")
+        return service
+    except HttpError as error:
+        logger.error(f"API error building Gmail service with token from {token_file}: {error.resp.status} - {error.content}", exc_info=True)
+        raise GmailApiError(f"API error building Gmail service: {error.resp.status}", original_exception=error)
+    except Exception as e:
+        logger.error(f"Unexpected error building Gmail service with token from {token_file}: {e}", exc_info=True)
+        raise DamienError(f"Unexpected error building Gmail service: {e}")
+
+
 # --- Label Operations ---
 _label_name_to_id_cache: Dict[str, str] = {}
 _system_labels = [

@@ -1,1 +1,152 @@
-[]
+[
+  {
+    "id": "d70825a4-e0e9-4978-822b-b0c1102c496b",
+    "name": "Example: Add Label from Sender",
+    "description": "Example rule: Adds 'MyLabel' to emails from 'sender@example.com'",
+    "is_enabled": true,
+    "conditions": [
+      {
+        "field": "from",
+        "operator": "contains",
+        "value": "sender@example.com"
+      }
+    ],
+    "condition_conjunction": "AND",
+    "actions": [
+      {
+        "type": "add_label",
+        "label_name": "MyLabel"
+      }
+    ]
+  },
+  {
+    "id": "e039cc0a-81c5-48d7-b701-822246038de2",
+    "name": "Disabled Rule Test",
+    "description": "This rule should not run",
+    "is_enabled": false,
+    "conditions": [
+      {
+        "field": "subject",
+        "operator": "contains",
+        "value": "ThisWontMatchBecauseDisabled"
+      }
+    ],
+    "condition_conjunction": "AND",
+    "actions": [
+      {
+        "type": "trash",
+        "label_name": null
+      }
+    ]
+  },
+  {
+    "id": "7ba303bc-9d11-454e-b5a0-4d739898e0e2",
+    "name": "Example: Multi-Condition OR Logic",
+    "description": "Example rule: Adds 'MyLabel' if email is from 'sender1@example.com' OR subject contains 'Order Confirmation'",
+    "is_enabled": true,
+    "conditions": [
+      {
+        "field": "from",
+        "operator": "contains",
+        "value": "sender1@example.com"
+      },
+      {
+        "field": "subject",
+        "operator": "contains",
+        "value": "Order Confirmation"
+      }
+    ],
+    "condition_conjunction": "OR",
+    "actions": [
+      {
+        "type": "add_label",
+        "label_name": "MyLabel"
+      }
+    ]
+  },
+  {
+    "id": "df90f85d-673b-453e-9e53-c74300bdc06e",
+    "name": "Example: Trash by Subject Keyword",
+    "description": "Example rule: Trashes emails with 'specific keyword' in subject",
+    "is_enabled": true,
+    "conditions": [
+      {
+        "field": "subject",
+        "operator": "contains",
+        "value": "specific keyword"
+      }
+    ],
+    "condition_conjunction": "AND",
+    "actions": [
+      {
+        "type": "trash",
+        "label_name": null
+      }
+    ]
+  },
+  {
+    "id": "d7ffb85a-d86f-4560-a3a3-32ea80b6aadc",
+    "name": "Example: Mark Read by Body Content",
+    "description": "Example rule: Marks emails as read if their body contains 'E2EBodyTestXYZ123'",
+    "is_enabled": true,
+    "conditions": [
+      {
+        "field": "body_snippet",
+        "operator": "contains",
+        "value": "E2EBodyTestXYZ123"
+      }
+    ],
+    "condition_conjunction": "AND",
+    "actions": [
+      {
+        "type": "mark_read",
+        "label_name": null
+      }
+    ]
+  },
+  {
+    "id": "d3103916-d072-44bc-8f4c-aab336246473",
+    "name": "Label Unread Alibaba",
+    "description": "Adds 'tobetrashedbyrule' to unread emails from news@notice.alibaba.com",
+    "is_enabled": true,
+    "conditions": [
+      {
+        "field": "from",
+        "operator": "contains",
+        "value": "news@notice.alibaba.com"
+      },
+      {
+        "field": "label",
+        "operator": "contains",
+        "value": "UNREAD"
+      }
+    ],
+    "condition_conjunction": "AND",
+    "actions": [
+      {
+        "type": "add_label",
+        "label_name": "tobetrashedbyrule"
+      }
+    ]
+  },
+  {
+    "id": "2c78adfa-39d5-46e9-95b0-eb3a4ea9b8a1",
+    "name": "Apply ToBeTrashed Label",
+    "description": "Adds 'tobetrashedbyrule' label. Intended to be used with specific queries.",
+    "is_enabled": true,
+    "conditions": [
+      {
+        "field": "subject",
+        "operator": "contains",
+        "value": ""
+      }
+    ],
+    "condition_conjunction": "AND",
+    "actions": [
+      {
+        "type": "add_label",
+        "label_name": "tobetrashedbyrule"
+      }
+    ]
+  }
+]

@@ -677,3 +677,149 @@ def test_batch_delete_permanently_no_service():
     # ACT & ASSERT
     with pytest.raises(InvalidParameterError, match="Gmail service not available"):
         gmail_api_service.batch_delete_permanently(None, ["msg1"])
+
+
+# --- Tests for get_g_service_client_from_token ---
+
+def test_get_g_service_client_from_token_valid_token(mock_credentials_class, mock_google_build, tmp_path):
+    # ARRANGE
+    token_path = tmp_path / "test_token.json"
+    creds_path = tmp_path / "test_creds.json"  # Dummy, may not be strictly needed if refresh_token is self-sufficient
+    
+    mock_creds_instance = MagicMock(spec=Credentials)
+    mock_creds_instance.valid = True
+    mock_creds_instance.expired = False
+    mock_credentials_class.from_authorized_user_file.return_value = mock_creds_instance
+    
+    # Simulate token file existing (content doesn't matter as from_authorized_user_file is mocked)
+    token_path.touch() 
+    creds_path.touch()  # Ensure credentials file "exists" for the logic path
+    
+    # ACT
+    service = gmail_api_service.get_g_service_client_from_token(
+        str(token_path), str(creds_path), app_config.SCOPES
+    )
+    
+    # ASSERT
+    mock_credentials_class.from_authorized_user_file.assert_called_once_with(str(token_path), app_config.SCOPES)
+    mock_google_build[0].assert_called_once_with('gmail', 'v1', credentials=mock_creds_instance)
+    assert service == mock_google_build[1]  # mock_google_build[1] is the mock_service_instance
+
+
+def test_get_g_service_client_from_token_refresh_success(mock_credentials_class, mock_google_build, tmp_path):
+    # ARRANGE
+    token_path = tmp_path / "test_token.json"
+    creds_path = tmp_path / "test_creds.json"
+    creds_path.write_text('{"installed":{}}')  # Dummy creds file for refresh context
+    
+    mock_creds_instance = MagicMock(spec=Credentials)
+    mock_creds_instance.valid = False  # Initially invalid
+    mock_creds_instance.expired = True
+    mock_creds_instance.refresh_token = "a_refresh_token"
+    mock_creds_instance.to_json.return_value = '{"refreshed": "new_token_data"}'
+    
+    # Simulate successful refresh by making 'valid' True after 'refresh' is called
+    def refresh_side_effect(request):
+        mock_creds_instance.valid = True
+    mock_creds_instance.refresh.side_effect = refresh_side_effect
+    
+    mock_credentials_class.from_authorized_user_file.return_value = mock_creds_instance
+    token_path.write_text('{"old": "token_data"}')  # Simulate existing token file
+    
+    with patch('builtins.open', new_callable=mock_open) as mocked_token_save:
+        # ACT
+        service = gmail_api_service.get_g_service_client_from_token(
+            str(token_path), str(creds_path), app_config.SCOPES
+        )
+    
+    # ASSERT
+    mock_creds_instance.refresh.assert_called_once()
+    # Check that the token file was opened for writing
+    mocked_token_save.assert_called_once_with(token_path, 'w')
+    # Check that the new token data was written
+    mocked_token_save().write.assert_called_once_with('{"refreshed": "new_token_data"}')
+    
+    mock_google_build[0].assert_called_once_with('gmail', 'v1', credentials=mock_creds_instance)
+    assert service == mock_google_build[1]
+
+
+def test_get_g_service_client_from_token_no_token_file(mock_credentials_class, tmp_path):
+    # ARRANGE
+    token_path = tmp_path / "nonexistent_token.json"  # Does not exist
+    creds_path = tmp_path / "test_creds.json"
+    creds_path.touch()  # Ensure this one exists
+    
+    # ACT & ASSERT
+    with pytest.raises(DamienError, match="Token file not found"):
+        gmail_api_service.get_g_service_client_from_token(
+            str(token_path), str(creds_path), app_config.SCOPES
+        )
+    
+    mock_credentials_class.from_authorized_user_file.assert_not_called()
+
+
+def test_get_g_service_client_from_token_refresh_failure(mock_credentials_class, tmp_path):
+    # ARRANGE
+    token_path = tmp_path / "test_token.json"
+    creds_path = tmp_path / "test_creds.json"
+    token_path.touch()
+    creds_path.touch()
+    
+    mock_creds_instance = MagicMock(spec=Credentials)
+    mock_creds_instance.valid = False
+    mock_creds_instance.expired = True
+    mock_creds_instance.refresh_token = "a_refresh_token"
+    # Simulate refresh failure
+    mock_creds_instance.refresh.side_effect = Exception("Refresh failed")
+    
+    mock_credentials_class.from_authorized_user_file.return_value = mock_creds_instance
+    
+    # ACT & ASSERT
+    with pytest.raises(DamienError, match="Token refresh failed"):
+        gmail_api_service.get_g_service_client_from_token(
+            str(token_path), str(creds_path), app_config.SCOPES
+        )
+    
+    mock_creds_instance.refresh.assert_called_once()
+
+
+def test_get_g_service_client_from_token_invalid_token_no_refresh(mock_credentials_class, tmp_path):
+    # ARRANGE
+    token_path = tmp_path / "test_token.json"
+    creds_path = tmp_path / "test_creds.json"
+    token_path.touch()
+    creds_path.touch()
+    
+    mock_creds_instance = MagicMock(spec=Credentials)
+    mock_creds_instance.valid = False
+    mock_creds_instance.expired = False  # Not expired
+    mock_creds_instance.refresh_token = None  # No refresh token
+    
+    mock_credentials_class.from_authorized_user_file.return_value = mock_creds_instance
+    
+    # ACT & ASSERT
+    with pytest.raises(DamienError, match="Token from .* is invalid and cannot be refreshed"):
+        gmail_api_service.get_g_service_client_from_token(
+            str(token_path), str(creds_path), app_config.SCOPES
+        )
+
+
+def test_get_g_service_client_from_token_build_api_error(mock_credentials_class, tmp_path):
+    # ARRANGE
+    token_path = tmp_path / "test_token.json"
+    creds_path = tmp_path / "test_creds.json"
+    token_path.touch()
+    creds_path.touch()
+    
+    mock_creds_instance = MagicMock(spec=Credentials)
+    mock_creds_instance.valid = True
+    mock_credentials_class.from_authorized_user_file.return_value = mock_creds_instance
+    
+    # Mock build to raise an HttpError
+    api_error = HttpError(resp=MagicMock(status=401), content=b"Unauthorized")
+    with patch('damien_cli.core_api.gmail_api_service.build', side_effect=api_error):
+        # ACT & ASSERT
+        with pytest.raises(GmailApiError, match="API error building Gmail service: 401"):
+            gmail_api_service.get_g_service_client_from_token(
+                str(token_path), str(creds_path), app_config.SCOPES
+            )

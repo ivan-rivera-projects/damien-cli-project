@@ -54,7 +54,7 @@ def permanent_delete(ids):
 
 if __name__ == "__main__":
     # Change to project directory
-    os.chdir("/Users/ivanrivera/Downloads/AWS/damien_cli_project/")
+    os.chdir("/Users/ivanrivera/Downloads/AWS/DamienPlatform/damien_cli_project/")
     
     # Permanently delete emails
     stdout, stderr, return_code = permanent_delete(email_ids)
